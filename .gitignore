@@ -1,16 +1,13 @@
 #MacOS
 .DS_Store
 
-# Dataset - never commit images
-IP102_v1.1/
+# Dataset
+ip102_v1.1
 
 # Training outputs - never commit checkpoints
 runs/
 *.pt
 *.pth
-
-# Generated manifests (regenerate with: python scripts/setup_data.py)
-data_manifests/*.csv
 
 # Python
 .venv/

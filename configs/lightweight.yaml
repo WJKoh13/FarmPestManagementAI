@@ -1,6 +1,0 @@
-extends: _base.yaml
-
-model: lightweight
-model_kwargs:
-  width_mult: 0.5
-  dropout: 0.2
