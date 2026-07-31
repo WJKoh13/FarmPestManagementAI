@@ -1,0 +1,8 @@
+extends: _base.yaml
+
+# VGG configuration E (16 conv layers). Identical to vgg16.yaml apart from the
+# layer config, so any difference in results is attributable to depth alone.
+model: vgg19
+model_kwargs:
+  width_mult: 0.5
+  dropout: 0.4

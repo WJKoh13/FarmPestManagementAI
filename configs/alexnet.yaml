@@ -1,0 +1,6 @@
+extends: _base.yaml
+
+model: alexnet
+model_kwargs:
+  width_mult: 1.0
+  dropout: 0.3

@@ -1,0 +1,16 @@
+{
+  "mean": [
+    0.503478,
+    0.556749,
+    0.375186
+  ],
+  "std": [
+    0.25322,
+    0.233711,
+    0.266869
+  ],
+  "computed_from": "data_manifests/train.csv",
+  "num_images": 4318,
+  "image_size": 160,
+  "note": "Training split only. Never recompute from validation or test data."
+}

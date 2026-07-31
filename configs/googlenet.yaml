@@ -1,0 +1,8 @@
+extends: _base.yaml
+
+model: googlenet
+model_kwargs:
+  dropout: 0.4
+  # Auxiliary heads change the loss function and would break the controlled
+  # comparison. Leave off unless running a clearly labelled extra experiment.
+  use_aux: false

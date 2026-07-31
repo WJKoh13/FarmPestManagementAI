@@ -1,0 +1,7 @@
+extends: _base.yaml
+
+model: residual
+model_kwargs:
+  blocks_per_stage: [2, 2, 2, 2]
+  stage_channels: [32, 64, 128, 256]
+  dropout: 0.3

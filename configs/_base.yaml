@@ -1,0 +1,33 @@
+# Locked initial training configuration - shared by every model.
+#
+# Do NOT edit these values for a single experiment. The controlled comparison is
+# only valid if the architecture is the sole difference between runs. If the team
+# agrees to change something here, record the change and re-run every model.
+
+# Data
+dataset_root: IP102_v1.1/Classification/ip102_v1.1
+train_manifest: data_manifests/train.csv
+val_manifest: data_manifests/validation.csv
+test_manifest: data_manifests/test.csv
+norm_stats: configs/norm_stats.json
+
+# Locked protocol
+image_size: 160
+batch_size: 32
+epochs: 60
+optimizer: adamw
+learning_rate: 0.001
+weight_decay: 0.0001
+loss: weighted_cross_entropy
+scheduler: reduce_on_plateau
+scheduler_factor: 0.5
+scheduler_patience: 5
+early_stopping_patience: 10
+seed: 42
+num_classes: 10
+primary_metric: macro_f1
+
+# Runtime - safe to change, does not affect the comparison
+device: auto
+num_workers: 4
+output_root: runs
