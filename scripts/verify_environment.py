@@ -21,15 +21,15 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from farm_pest_ai.cli import base_parser, config_from_args  # noqa: E402
-from farm_pest_ai.config import ConfigError  # noqa: E402
-from farm_pest_ai.logging_config import configure_logging, get_logger  # noqa: E402
-from farm_pest_ai.reproducibility import environment_snapshot  # noqa: E402
-from farm_pest_ai.scopes import SCOPES, num_classes_for  # noqa: E402
+from farm_pest_ai.cli import base_parser, config_from_args
+from farm_pest_ai.config import ConfigError
+from farm_pest_ai.logging_config import configure_logging, get_logger
+from farm_pest_ai.reproducibility import environment_snapshot
+from farm_pest_ai.scopes import SCOPES, num_classes_for
 
 #: Packages required for the harness itself to function.
 REQUIRED_PACKAGES = ("yaml",)
@@ -160,15 +160,17 @@ def check_harness(args: argparse.Namespace) -> list[Check]:
         try:
             spec.validate()
             derived = num_classes_for(name)
+            mapping = "identity" if spec.is_identity else "remapped"
             checks.append(
                 Check(
                     f"scope:{name}",
                     True,
-                    f"{derived} classes, mapping {'identity' if spec.is_identity else 'remapped'}",
+                    f"{derived} classes, mapping {mapping}",
                     data={"num_classes": derived},
                 )
             )
-        except Exception as exc:  # noqa: BLE001 - reported, not raised
+        # Broad by design: a broken scope is reported as a failed check, not raised.
+        except Exception as exc:
             checks.append(Check(f"scope:{name}", False, f"{type(exc).__name__}: {exc}"))
 
     try:

@@ -8,8 +8,9 @@ identically no matter which script is run.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .config import Config, load_config
 from .logging_config import configure_logging, get_logger
@@ -17,10 +18,10 @@ from .reproducibility import SeedState, seed_everything
 from .scopes import scope_names
 
 __all__ = [
-    "base_parser",
     "add_bootstrap_path",
-    "config_from_args",
+    "base_parser",
     "bootstrap",
+    "config_from_args",
 ]
 
 

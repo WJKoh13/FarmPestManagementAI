@@ -49,7 +49,7 @@ def test_inconsistent_scope_and_num_classes_rejected(
     minimal_config["dataset"]["scope"] = scope
     minimal_config["dataset"]["num_classes"] = stated
     config = Config(data=minimal_config)
-    with pytest.raises(ConfigError, match="contradicts dataset.scope"):
+    with pytest.raises(ConfigError, match=r"contradicts dataset\.scope"):
         config.validate()
 
 
@@ -69,7 +69,7 @@ def test_unknown_scope_rejected(minimal_config: dict[str, Any]) -> None:
 
 def test_missing_scope_rejected() -> None:
     config = Config(data={"dataset": {}, "paths": {}})
-    with pytest.raises(ConfigError, match="dataset.scope is required"):
+    with pytest.raises(ConfigError, match=r"dataset\.scope is required"):
         config.validate()
 
 
@@ -162,7 +162,7 @@ def test_env_override_can_still_conflict(
         "c.yaml", {"dataset": {"scope": "rice10", "num_classes": 10}, "paths": {}}
     )
     monkeypatch.setenv("FPA__DATASET__SCOPE", "full102")
-    with pytest.raises(ConfigError, match="contradicts dataset.scope"):
+    with pytest.raises(ConfigError, match=r"contradicts dataset\.scope"):
         load_config(path)
 
 

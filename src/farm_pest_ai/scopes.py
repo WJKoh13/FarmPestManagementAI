@@ -23,20 +23,21 @@ offset is applied in :mod:`farm_pest_ai.data.manifests`, not here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Mapping, Sequence
+from typing import Final
 
 __all__ = [
     "CLASS_MAPPING_VERSION",
+    "FULL102",
+    "RICE10",
+    "SCOPES",
     "DatasetScope",
     "ScopeSpec",
-    "SCOPES",
-    "RICE10",
-    "FULL102",
     "get_scope",
-    "resolve_scope",
-    "num_classes_for",
     "is_valid_scope",
+    "num_classes_for",
+    "resolve_scope",
     "scope_names",
 ]
 
@@ -75,7 +76,7 @@ class ScopeSpec:
     @property
     def project_to_original(self) -> Mapping[int, int]:
         """Map project label -> original IP102 label."""
-        return {p: o for p, o in enumerate(self.original_labels)}
+        return dict(enumerate(self.original_labels))
 
     @property
     def original_to_project(self) -> Mapping[int, int]:

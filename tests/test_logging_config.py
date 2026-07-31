@@ -41,7 +41,11 @@ def test_jsonl_file_is_written(tmp_path: Path) -> None:
     for handler in logger.handlers:
         handler.flush()
 
-    lines = [l for l in log_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line
+        for line in log_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["event"] == "epoch_end"
@@ -67,7 +71,11 @@ def test_level_is_respected(tmp_path: Path) -> None:
     for handler in logger.handlers:
         handler.flush()
 
-    lines = [l for l in log_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [
+        line
+        for line in log_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(lines) == 1
     assert json.loads(lines[0])["message"] == "kept"
 

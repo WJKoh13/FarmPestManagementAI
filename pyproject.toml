@@ -10,9 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
 
-# Runtime dependencies are declared here but NOT installed during Phase 2.
-# Phase 3 selects exact pinned versions (including the PyTorch CUDA build) and
-# records them in requirements-lock.txt.
+# Version floors only. The exact resolved versions provisioned in Phase 3 -
+# including the PyTorch CUDA 12.6 build, which is not on PyPI - live in
+# requirements-lock.txt and are what the container build must reproduce.
 dependencies = [
   "pyyaml>=6.0",
   "numpy>=1.26",

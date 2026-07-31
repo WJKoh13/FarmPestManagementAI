@@ -8,8 +8,8 @@ stops and waits for `CONTINUE PHASE <n>`.
 | --- | --- | --- |
 | 1 | Read-only discovery | **Complete** |
 | 2 | Project harness | **Complete** |
-| 3 | Python, Docker and CUDA environment | Next |
-| 4 | Full dataset audit and derived manifests | Pending |
+| 3 | Python, Docker and CUDA environment | **Complete** |
+| 4 | Full dataset audit and derived manifests | Next |
 | 5 | Data loader and preprocessing | Pending |
 | 6 | Custom CNN and smoke training | Pending |
 | 7 | rice10 development experiments | Pending |

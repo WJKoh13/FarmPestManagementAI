@@ -66,18 +66,33 @@ Full audit results are in [docs/DATASET.md](docs/DATASET.md).
 
 ## Getting started
 
-Requires Python 3.10+. Dependencies are **not** installed yet — that happens in
-Phase 3, which selects the exact PyTorch/CUDA build.
+Requires Python 3.10+. Phase 3 provisions a project virtual environment with the
+CUDA 12.6 PyTorch build.
+
+```bash
+# Create the environment (Windows: use the official CPython, not MSYS2)
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-lock.txt
+.venv\Scripts\python.exe -m pip install -e . --no-deps
+```
+
+> On this machine an MSYS2 Python shadows CPython on `PATH` and cannot run
+> PyTorch. Invoke `.venv\Scripts\python.exe` explicitly rather than `python`.
 
 ```bash
 # Verify the harness and report on the environment
-python scripts/verify_environment.py
+.venv\Scripts\python.exe scripts/verify_environment.py
+
+# Fail the run if PyTorch or CUDA is missing
+.venv\Scripts\python.exe scripts/verify_environment.py --require-torch
 
 # Inspect the fully resolved configuration
-python scripts/verify_environment.py --config data_full102.yaml --print-config
+.venv\Scripts\python.exe scripts/verify_environment.py --config data_full102.yaml --print-config
 
-# Run the test suite
-python -m pytest -q
+# Run the test suite, linter and type checker
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m ruff check src scripts tests
+.venv\Scripts\python.exe -m mypy
 ```
 
 Every script supports `--help`, `--config`, `--set`, `--scope`, `--seed`,
@@ -124,7 +139,7 @@ results, open risks and the next phase, then stops for explicit approval before
 continuing. Installing software, pulling images or models, running full training
 and starting persistent services all require approval.
 
-Current state: **Phase 2 complete** (project harness). See
+Current state: **Phase 3 complete** (Python, Docker and CUDA environment). See
 [docs/STATUS.md](docs/STATUS.md) and [docs/PHASES.md](docs/PHASES.md).
 
 ## Documentation

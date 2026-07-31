@@ -21,25 +21,26 @@ from __future__ import annotations
 import copy
 import json
 import os
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any
 
 import yaml
 
 from .scopes import ScopeSpec, num_classes_for, resolve_scope, scope_names
 
 __all__ = [
-    "ENV_PREFIX",
     "ENV_NESTING_SEPARATOR",
-    "ConfigError",
+    "ENV_PREFIX",
     "Config",
+    "ConfigError",
     "DatasetConfig",
     "PathsConfig",
-    "load_config",
-    "project_root",
     "deep_merge",
+    "load_config",
     "parse_override",
+    "project_root",
 ]
 
 #: Prefix identifying environment variables that override configuration.
