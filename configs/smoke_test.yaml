@@ -1,0 +1,31 @@
+# Smoke-test configuration: proves the pipeline runs end to end in minutes.
+#
+# Not a real experiment. Metrics from this config are meaningless and must
+# never be reported as results.
+
+extends: model_custom.yaml
+
+dataset:
+  scope: rice10
+
+training:
+  batch_size: 16
+  epochs: 1
+  warmup_epochs: 0
+  early_stopping:
+    patience: 1
+
+smoke:
+  # Cap the number of batches per phase so a run finishes quickly.
+  max_train_batches: 10
+  max_validation_batches: 5
+  # Small-batch overfit check: the model must drive loss near zero on a handful
+  # of images, proving gradients actually flow.
+  overfit_batch_size: 8
+  overfit_steps: 100
+  overfit_target_loss: 0.05
+
+runtime:
+  num_workers: 2
+  persistent_workers: false
+  prefetch_factor: 2

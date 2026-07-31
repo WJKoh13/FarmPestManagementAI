@@ -1,0 +1,61 @@
+# Base configuration for the Organic Farm Pest Management AI experiment.
+#
+# Layering: files (via `extends`) < FPA__* environment variables < --set flags.
+# Paths are relative to the project root unless absolute, so this file works
+# unchanged on Windows and inside a Linux container.
+#
+# `dataset.num_classes` is NEVER set here. It is derived from `dataset.scope`
+# by farm_pest_ai.scopes. Stating a value that contradicts the scope is a hard
+# configuration error.
+
+project:
+  name: farm-pest-management-ai
+  branch: zy_CNN
+  description: Offline organic farm pest identification and IPM guidance
+
+paths:
+  # Override with FPA__PATHS__DATASET_ROOT or --set paths.dataset_root=...
+  dataset_root: ip102_v1.1
+  classification_root: ip102_v1.1/Classification
+  images_dir: ip102_v1.1/Classification/images
+  processed_dir: data/processed
+  knowledge_dir: data/knowledge
+  reports_dir: data/reports
+  manual_evaluation_dir: data/manual_evaluation
+  artifacts_dir: artifacts
+  # checkpoints_dir, logs_dir, metrics_dir, plots_dir, predictions_dir,
+  # exports_dir and model_registry_dir default to subdirectories of
+  # artifacts_dir; set them explicitly only to move them elsewhere.
+
+dataset:
+  # Active classification scope: rice10 or full102.
+  scope: rice10
+  image_size: [160, 160]
+  # Bumped when derived manifests change meaning.
+  manifest_version: 1.0.0
+  # Bumped when preprocessing changes in a way that invalidates checkpoints.
+  preprocessing_version: 1.0.0
+  # Source manifest filenames, relative to classification_root.
+  source_manifests:
+    train: train.txt
+    validation: val.txt
+    test: test.txt
+  classes_file: classes.txt
+
+reproducibility:
+  seed: 1337
+  deterministic: true
+  cudnn_benchmark: false
+
+logging:
+  level: INFO
+  json_lines: true
+
+runtime:
+  # auto resolves to cuda when available, otherwise cpu.
+  device: auto
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  amp: true
