@@ -170,6 +170,19 @@ python scripts/verify_environment.py --config data_full102.yaml --print-config
 python -m pytest -q
 ```
 
+After Phase 4 built the derived manifests:
+
+```bash
+python scripts/build_manifests.py --scope rice10
+python scripts/build_manifests.py --scope full102 --check
+python scripts/verify_dataset.py --scope rice10
+python scripts/audit_dataset.py --scope rice10
+```
+
+`verify_dataset.py` is the fast pre-training gate and does not decode images.
+`audit_dataset.py` decodes and hashes every image; `--scope full102` takes
+roughly ten minutes.
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

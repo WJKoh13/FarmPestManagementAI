@@ -20,11 +20,22 @@ Scope selection (Phase 8) weighs intended application coverage, validation
 quality, per-class behaviour, runtime, model size, hardware feasibility and
 knowledge-base feasibility — not a single headline number.
 
-### Known measurement caveat
+### Known measurement caveats
 
 `full102` validation contains classes with as few as 7 images (labels 72 and
 80). Per-class recall for the rare tail is therefore very noisy, and macro F1
 inherits that variance. This is reported explicitly rather than smoothed over.
+
+**Exact-content test leakage in `full102`.** The Phase 4 audit found two
+byte-identical train/test pairs: 40410/40432 (label 56) and 65553/66152
+(label 92). Two contaminated images out of 22,619 is ~0.009% of the test set,
+far too small to move a headline metric, but Phase 9 reports test results **with
+and without** them rather than assuming the effect is negligible. The official
+splits are not modified. `rice10` has **zero** cross-split leakage.
+
+Byte hashing detects exact copies only. Near-duplicate leakage — the same photo
+re-encoded at a different JPEG quality — remains unmeasured, so no claim of
+"leakage-free" is made for either scope.
 
 ## Manual evaluation
 

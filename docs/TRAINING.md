@@ -17,6 +17,16 @@ that experiments stay comparable.
 - The fully resolved configuration is stored with every run.
 - Structured JSON Lines metrics and logs per run.
 
+## Preprocessing constraints from the Phase 4 audit
+
+- Images must be **converted to RGB explicitly**. Ten `.jpg` files are really
+  PNG and seven of those are RGBA; left alone they would present a fourth input
+  channel. See [DATASET.md](DATASET.md).
+- The loader must dispatch on image **content**, not on the file extension.
+- ~4-10% of images are below 160 px on the short side and get upscaled. The
+  interpolation choice is a Phase 5 decision, recorded with the preprocessing
+  version.
+
 ## Selection metric
 
 **Primary: validation macro F1.** Chosen over accuracy because both scopes are

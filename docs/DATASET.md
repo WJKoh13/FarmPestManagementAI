@@ -114,6 +114,12 @@ is defined once in `farm_pest_ai.scopes` and is covered by an exact test.
 | rice10, all 7,205 images | 100% real JPEG by header, PIL mode RGB, **0 decode failures**, 0 truncated, 0 extension/content mismatches |
 | full102, random 2,000 | Identical: 100% JPEG, RGB, 0 failures |
 
+> **Superseded for `full102` by Phase 4.** The exhaustive decode of all 75,222
+> images found ten PNG files carrying a `.jpg` extension, seven of them RGBA.
+> The 2,000-image sample happened to miss all ten. See
+> [Phase 4 verification results](#phase-4-verification-results). The `rice10`
+> row stands: it was already exhaustive.
+
 ### Image dimensions
 
 | Scope | Width min/median/max | Height min/median/max | Aspect min/median/max |
@@ -129,10 +135,11 @@ is defined once in `farm_pest_ai.scopes` and is covered by an exact test.
 | full102 | 4.5% | 29.1% |
 
 A meaningful minority of images must be **upscaled** to reach 160x160, which
-introduces interpolation blur. Phase 4 records the source dimensions in the
-derived manifests so this cohort can be analysed separately, and Phase 9 checks
-whether errors concentrate in it. The fact that ~30-40% of images are already
-below 224 px supports 160x160 as the input size rather than a larger one.
+introduces interpolation blur. Phase 4 measured this exhaustively for both
+scopes; see [Phase 4 verification results](#phase-4-verification-results) for the
+final figures. Phase 9 checks whether errors concentrate in this cohort. The fact
+that ~30-40% of images are already below 224 px supports 160x160 as the input
+size rather than a larger one.
 
 ### Measured decode throughput
 
@@ -167,11 +174,119 @@ contradicting `num_classes` is rejected with an error.
   one family-level name (`Cicadellidae`); taxonomy is **not** silently
   corrected. A separate canonical name field is recorded alongside the raw name.
 
-## Not yet measured
+## Phase 4 verification results
 
-Deferred to Phase 4:
+Phase 4 built the derived manifests and completed the checks Phase 1 deferred.
+Every image in **both** scopes was decoded in full and hashed: 75,222 images for
+`full102`, of which 7,205 form `rice10`.
 
-- Exact-content duplicate detection by hash.
-- Exact-content cross-split leakage (a real risk to headline metrics for IP102,
-  since filename-level checks being clean does not rule it out).
-- Full decode of all 75,222 images (only rice10 was exhaustively decoded).
+Reports: `data/reports/dataset_audit_rice10.json`,
+`data/reports/dataset_audit_full102.json`.
+
+### Derived manifests
+
+`data/processed/<scope>/{train,validation,test}.csv`, each with a
+`.metadata.json` sidecar and a `class_mapping.json` per scope. Columns:
+`filename, relative_path, ip102_label, project_label, class_name, split`.
+
+Both the IP102 label and the project label are stored, so nothing downstream
+re-derives the mapping. Every record count reproduced Phase 1 exactly, and the
+build is idempotent: `scripts/build_manifests.py --check` passes for both scopes.
+
+### Full decode
+
+| Scope | Images | Decode failures | Truncated |
+| --- | --- | --- | --- |
+| rice10 | 7,205 | **0** | 0 |
+| full102 | 75,222 | **0** | 0 |
+
+### Format anomaly: ten PNG files with a `.jpg` extension
+
+Phase 1 sampled 2,000 `full102` images and saw 100% JPEG. The exhaustive decode
+found that this was a sampling artefact. **Ten files are actually PNG**, and
+**seven of those carry an alpha channel (RGBA)**:
+
+| Split | Files | Mode |
+| --- | --- | --- |
+| train | 40256, 40557 | RGB |
+| train | 40549, 40563, 40577 | RGBA |
+| test | 40630 | RGB |
+| test | 40314, 40574, 40591, 40601 | RGBA |
+
+All ten belong to **IP102 label 56**, and all ten decode without error, because
+Pillow dispatches on content rather than on the extension.
+
+Two consequences for Phase 5:
+
+- The loader must not switch to an extension-based reader.
+- It must convert to RGB explicitly. An RGBA image left alone would hand the CNN
+  a fourth input channel.
+
+These files are **not** renamed or re-encoded: the source tree is read-only. The
+filenames are pinned by tests in `tests/test_dataset_integration.py`.
+
+### Exact-content duplicates and cross-split leakage
+
+Measured by SHA-256 over file bytes. This detects exact duplicates only; two
+visually identical images saved at different JPEG qualities hash differently, so
+near-duplicate leakage is **not** ruled out by this check.
+
+| Scope | Duplicate groups | Within-split | **Cross-split** | Label conflicts |
+| --- | --- | --- | --- | --- |
+| rice10 | 1 | 1 | **0** | 0 |
+| full102 | 5 | 3 | **2** | 0 |
+
+**`rice10` has zero cross-split leakage.** Its validation figures are
+uncontaminated, which reinforces it as the development scope.
+
+`full102` carries two byte-identical train/test pairs, both within a single
+class:
+
+| Train | Test | IP102 label |
+| --- | --- | --- |
+| 40410.jpg | 40432.jpg | 56 |
+| 65553.jpg | 66152.jpg | 92 |
+
+Two contaminated images out of 22,619 is roughly 0.009% of the test set, far too
+small to move a headline metric. It is recorded rather than corrected: the
+official splits are never modified. Phase 9 reports test metrics both with and
+without these two images.
+
+No duplicate group carries conflicting labels in either scope, so there is no
+annotation contradiction among identical files.
+
+### Dimensions, re-measured exhaustively
+
+Phase 1's `full102` figures came from a 2,000-image sample; these cover every
+image.
+
+| Scope / split | Short side min/median/max | < 160 px | < 224 px |
+| --- | --- | --- | --- |
+| rice10 train | 63 / 256 / 4,303 | 6.3% | 40.7% |
+| rice10 validation | 85 / 250 / 3,240 | 8.3% | 42.6% |
+| rice10 test | 64 / 247 / 3,456 | 9.6% | 43.5% |
+| full102 train | 52 / 320 / 4,303 | 4.0% | 28.9% |
+| full102 validation | 72 / 320 / 3,456 | 5.3% | 31.0% |
+| full102 test | 59 / 320 / 6,034 | 5.8% | 31.3% |
+
+The sub-160px cohort is real but modest, and the ~29-44% below 224 px continues
+to support 160x160 as the input size rather than something larger.
+
+### Distributions, reconfirmed
+
+`full102` train imbalance is **82.0x**, with label 72 the smallest at 42 training
+images and label 101 the largest at 3,444. Validation still has classes with only
+7 images (label 72), so macro F1 on `full102` remains noisy for the rare tail.
+
+`rice10` imbalance is **2.8x** across all three splits.
+
+Both scopes have all classes present in all three splits, no filename appears in
+more than one split, and every derived record traces back to the source manifest
+in order.
+
+## Still not measured
+
+- **Near-duplicate** detection by perceptual hashing. Byte-level hashing catches
+  only exact copies, so visually redundant images remain possible.
+- Whether classification errors concentrate in the sub-160px upscale cohort.
+  Recorded now; analysed in Phase 9.

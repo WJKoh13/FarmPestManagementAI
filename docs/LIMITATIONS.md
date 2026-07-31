@@ -2,7 +2,7 @@
 
 Recorded honestly as they are discovered, not only at the end.
 
-## Known now (Phases 1-2)
+## Known now (Phases 1-4)
 
 ### Dataset
 
@@ -11,13 +11,23 @@ Recorded honestly as they are discovered, not only at the end.
 - **Very small validation classes**: `full102` validation has classes with only
   7 images. Per-class recall there is statistically noisy, and macro F1
   inherits that variance.
-- **Low-resolution images**: 7.5% of `rice10` and 4.5% of `full102` images have
-  a short side below 160 px and must be upscaled, losing genuine detail.
-  41.7% of `rice10` images are below 224 px.
-- **Content duplicates and cross-split leakage are not yet measured.**
-  Filename-level checks are clean, but that does not rule out identical image
-  content appearing in more than one split, which would inflate results. This
-  is measured in Phase 4.
+- **Low-resolution images**: measured exhaustively in Phase 4. Below 160 px on
+  the short side: `rice10` 6.3/8.3/9.6% and `full102` 4.0/5.3/5.8% for
+  train/validation/test. These are upscaled, losing genuine detail. Roughly
+  29-44% of images are below 224 px.
+- **Exact-content cross-split leakage in `full102`** (measured in Phase 4): two
+  byte-identical train/test pairs, 4 files in total, ~0.009% of the test set.
+  Recorded rather than corrected, since official splits are never modified;
+  Phase 9 reports test metrics with and without them. `rice10` has **zero**
+  cross-split leakage.
+- **Near-duplicate leakage remains unmeasured.** Phase 4 hashed file bytes,
+  which catches only exact copies. The same photograph re-encoded at a different
+  JPEG quality would not be detected, so neither scope can be called
+  leakage-free. Perceptual hashing was not run.
+- **Ten `.jpg` files are actually PNG, seven of them RGBA** (all IP102 label
+  56), found by the Phase 4 full decode; Phase 1's 2,000-image sample missed
+  them. They decode correctly, but the loader must convert to RGB explicitly or
+  the CNN receives a fourth input channel.
 - **Taxonomy is inconsistent in the source**: `classes.txt` mixes common names
   with Latin binomials and includes at least one family-level name
   (`Cicadellidae`). Raw names are preserved rather than silently corrected.
@@ -39,7 +49,8 @@ Recorded honestly as they are discovered, not only at the end.
 - Only ~4.1 GB of the RTX 4070 Laptop's 8 GB VRAM was free during Phase 1 with
   an ordinary desktop session running. Batch sizes and concurrent GPU use are
   constrained accordingly.
-- Docker GPU passthrough is registered but unverified until Phase 3.
+- Docker GPU passthrough was verified in Phase 3 under both `--gpus all` and
+  `--runtime=nvidia`.
 
 ### Environment
 
@@ -59,7 +70,7 @@ Recorded honestly as they are discovered, not only at the end.
 
 ## To be added
 
-Populated in later phases: measured duplicate and leakage rates (4), loader and
-augmentation caveats (5), architecture limitations (6-8), final model error
-analysis and calibration quality (9), knowledge coverage gaps (10), LLM
-hallucination and unsupported-claim rates (11), and deployment constraints (14).
+Populated in later phases: loader and augmentation caveats (5), architecture
+limitations (6-8), final model error analysis and calibration quality (9),
+knowledge coverage gaps (10), LLM hallucination and unsupported-claim rates
+(11), and deployment constraints (14).
