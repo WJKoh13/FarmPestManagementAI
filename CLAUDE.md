@@ -194,6 +194,20 @@ python scripts/verify_loader.py --scope full102 --report
 determinism and training-only augmentation. It omits the test split unless
 `--include-test` is passed, which is intended for Phase 9.
 
+After Phase 6 built the models and training engine:
+
+```bash
+python scripts/smoke_train.py
+python scripts/smoke_train.py --scope full102 --report
+python scripts/smoke_train.py --model baseline_cnn
+```
+
+`smoke_train.py` is the Phase 6 gate. It builds both architectures, proves
+gradients flow by overfitting a small batch, runs one capped epoch, and verifies
+that checkpoints round-trip and that cross-scope loading is refused. Its metrics
+are meaningless: artifacts are marked `smoke: true` and the run directory is
+deleted unless `--keep-run` is passed. It takes roughly one minute per scope.
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

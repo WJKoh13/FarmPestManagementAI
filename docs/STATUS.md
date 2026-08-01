@@ -4,15 +4,16 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 5 — Data loader and preprocessing** |
-| Next phase | Phase 6 — Custom CNN and smoke training |
+| Current phase completed | **Phase 6 — Custom CNN and smoke training** |
+| Next phase | Phase 7 — rice10 development experiments |
 | Branch | `zy_CNN` |
 | Active default scope | `rice10` (switchable to `full102`) |
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | 428 passed (246 through Phase 4, plus 182 loader tests) |
+| Test suite | 601 passed (428 through Phase 5, plus 173 vision tests) |
 | Lint / types | `ruff` clean, `mypy` clean |
+| Models | `baseline_cnn` 3.36M params, `custom_cnn` 1.44M params (rice10) |
 | Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
 | Derived manifests | Built for both scopes, idempotent, verified against source |
 | Preprocessing version | `1.0.0`, fingerprint `9e75177ab60f96e0` (identical for both scopes) |
@@ -219,6 +220,76 @@ it has a GPU, not skipped for it.
 182 tests were added across four files, including 29 that read the real dataset.
 The suite is 428 passing, with `ruff` and `mypy` clean.
 
+### Phase 6 — Custom CNN and smoke training (complete)
+
+Built the vision layer — `blocks.py` (primitives), `models.py` (the two
+architectures), `metrics.py` (scoring), `checkpoints.py` (provenance),
+`training.py` (the engine) — plus `scripts/smoke_train.py` as the Phase 6 gate.
+No real experiment was run, no hyperparameter was selected, and the test split
+was never opened.
+
+**Two architectures, both from primitive layers.** `baseline_cnn` is a plain
+conv-BN-ReLU control at 3,363,530 parameters; `custom_cnn` is residual
+depthwise-separable with squeeze-and-excitation and stochastic depth at
+**1,435,242** — 2.3x smaller despite being deeper, because its convolutions are
+factorised. Whether that buys accuracy is a Phase 7 question. `torchvision.models`
+and pretrained weights are imported nowhere.
+
+**Gradients are proven to flow, not assumed.** The gate trains one 8-image batch
+for 100 steps and requires the loss to collapse. This is the check that
+separates "the loop ran" from "the model learned" — a detached tensor, a frozen
+parameter or a mis-shaped loss all leave a one-epoch run looking entirely
+normal. Both scopes reach 100% accuracy on the batch and land within 0.004 of
+the theoretical loss floor, and every trainable parameter is confirmed to
+receive a gradient.
+
+**New finding — the label-smoothing loss floor is not zero.** With `eps=0.1`
+over 10 classes the minimum achievable cross-entropy is **0.5003**, the entropy
+of the smoothed target, rising to **0.7799** at 102 classes. A first version of
+the gate compared a converged model against a near-zero target and failed it:
+the model had reached 0.5038, essentially exactly the floor, with 100% accuracy
+on the batch. `label_smoothing_loss_floor` now computes this, tests verify it
+against a direct numerical minimisation of the real loss, and the threshold is
+measured above the floor. A fixed threshold could not have served both scopes.
+
+**New finding — AMP calibration silently consumed a short run's budget.**
+torch's default `init_scale` of 65536 overflowed on this model's first few
+steps; the scaler halves the scale and **skips the optimiser step** each time,
+so roughly five of ten capped batches did no training at all. On a full run this
+is negligible warmup, but it made the smoke epoch look like it never learned.
+Fixed by starting the scaler at 2**12, and the engine now detects a skipped step
+and holds the scheduler back, so the learning rate never advances past an
+optimiser step that did not happen.
+
+**New finding — capped validation must stride, not truncate.** Evaluation
+loaders preserve official manifest order, which is grouped by class, so the
+first five validation batches of `rice10` are **entirely class 0**. Macro F1 was
+therefore 0.0000 for any model whatsoever, which made the epoch check incapable
+of detecting a regression. Validation batches are now sampled with a stride
+across the split: on the same 80-image budget, class coverage went from 1 of 10
+to 6 of 10. The smoke budget was also raised from 10 to 60 training batches, so
+one epoch now produces a measurable score (macro F1 0.032, accuracy 0.154), and
+the gate fails outright if the epoch scores zero.
+
+**Checkpoint provenance is enforced before any weight is copied.** Every
+checkpoint embeds scope, class count, class-mapping version, manifest and
+preprocessing versions, the preprocessing fingerprint, model configuration,
+epoch, seed, environment and Git revision. Loading a `rice10` checkpoint under
+`full102` raises, as does a stale class mapping, a manifest mismatch or — under
+`strict_preprocessing`, which inference defaults to — a changed preprocessing
+fingerprint. Writes are atomic with an `fsync`. The JSON sidecar is explicitly
+**not** authoritative: a test rewrites one to claim the wrong scope and confirms
+the embedded metadata still governs.
+
+**Metrics verified against scikit-learn.** Accuracy, macro F1, weighted F1,
+balanced accuracy and per-class F1 all match exactly, including the
+zero-division convention. Smoke-run artifacts are marked `smoke: true` and the
+run directory is deleted by default, so a meaningless number cannot later be
+read as a result.
+
+173 tests were added across five files, 11 of which read the real dataset. The
+suite is 601 passing, with `ruff` and `mypy` clean.
+
 ## Verified invariants
 
 These are enforced by tests and re-checked every phase.
@@ -261,6 +332,32 @@ These are enforced by tests and re-checked every phase.
   `allow_cpu_fallback=False`.
 - The resolved preprocessing is fingerprinted; any change to size,
   interpolation, normalisation or augmentation changes the fingerprint.
+- Models output `num_classes` **raw logits**; no softmax is applied inside a
+  model, and tests fail if output rows ever sum to 1.
+- `model.num_classes` may not be stated in configuration. It is derived from
+  `dataset.scope`, and stating it is a hard error rather than a silent override,
+  so the class count has exactly one source of truth.
+- A model whose output width disagrees with the scope, or with the data bundle
+  it would train on, is refused at construction.
+- Every model input is checked to be a 4-D three-channel batch at the model
+  boundary, so a four-channel tensor fails loudly rather than deep inside a
+  convolution.
+- Checkpoints carry scope, class count, class-mapping version, manifest and
+  preprocessing versions and fingerprint. Loading one under a different scope or
+  a stale class mapping raises, and the check runs before any weight is copied.
+- A checkpoint's JSON sidecar is never authoritative; the embedded metadata
+  governs, so editing or deleting a sidecar cannot make a bad checkpoint load.
+- Checkpoint writes are atomic and fsynced, so an interrupted save leaves the
+  previous checkpoint intact rather than a truncated file.
+- Class weights reach the loss only from the training split, pre-computed by
+  `build_loaders`; the engine never derives them itself.
+- Weight decay is never applied to normalisation parameters or biases.
+- The learning-rate schedule never advances past an optimiser step that AMP
+  skipped.
+- Metric aggregation is verified against scikit-learn, and a class the model
+  never predicts scores zero in the macro average rather than being excluded.
+- Smoke-run checkpoints and metrics are marked `smoke: true`, and the run
+  directory is deleted unless `--keep-run` is passed.
 
 ## Open risks
 
@@ -283,6 +380,10 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 13 | **New in Phase 5**: augmentation magnitudes are untuned guesses. Phase 5 fixed the mechanism, not the strength | 7 |
 | 14 | **New in Phase 5**: training-run reproducibility is conditional on a fixed `runtime.num_workers`. Changing the worker count changes how per-worker RNG streams interleave, so the exact augmentations drawn differ. Evaluation is unaffected | 7, 8 |
 | 15 | **New in Phase 5**: normalisation uses ImageNet constants as fixed numbers rather than statistics measured on IP102. Changing them requires bumping `dataset.preprocessing_version` | 7 |
+| 16 | **New in Phase 6**: no architecture or hyperparameter has been tuned. Learning rate, batch size, epochs, augmentation strength and the two architectures' widths and depths are all untested defaults. The smoke figures are not evidence of anything | 7, 8 |
+| 17 | **New in Phase 6**: `custom_cnn` is 2.3x smaller than `baseline_cnn` but has never been compared to it on a real run. The control may yet win, in which case the extra complexity is not earning its place | 7 |
+| 18 | **New in Phase 6**: AMP skipping optimiser steps during scale calibration is handled, but the interaction was found by inspection rather than by a test that would catch a regression in torch's scaler behaviour | 7 |
+| 19 | **New in Phase 6**: full training reproducibility is untested end to end. Seeds, worker streams and RNG-state resumption are all implemented and unit-tested, but no two full runs have been compared for bit-identical results | 7 |
 
 ## Rules in force
 

@@ -128,6 +128,97 @@ Estimated wall-clock from Phase 1 measurements:
 Data loading is not the bottleneck: 449.7 img/s single-process warm, well above
 what one GPU consumes at this input size.
 
+## Architectures (Phase 6)
+
+Both are built from primitive PyTorch layers in `farm_pest_ai.vision.blocks`. No
+`torchvision.models`, prebuilt architecture, pretrained weight or downloaded
+checkpoint is imported anywhere.
+
+| | `baseline_cnn` (Model A) | `custom_cnn` (Model B) |
+| --- | --- | --- |
+| Structure | 3 stages of conv-BN-ReLU x2 + max pool | Strided stem + 4 stages of residual separable blocks |
+| Parameters (rice10) | 3,363,530 | **1,435,242** |
+| Parameters (full102) | 3,457,382 | 1,470,662 |
+| Parameter memory | 12.84 MiB | **5.54 MiB** |
+
+Model B is **2.3x smaller** than the control despite being deeper, because its
+`3x3` convolutions are factorised into depthwise plus pointwise pairs. Whether
+that translates into a better validation macro F1 is a Phase 7 question; Phase 6
+only establishes that both build, train and checkpoint correctly.
+
+Model B's blocks add squeeze-and-excitation channel gating and stochastic depth
+that ramps linearly from 0 at the first block to `drop_path` at the last. The
+ramp matters: dropping early blocks as often as late ones removes the low-level
+features the whole network depends on.
+
+The second separable convolution in each residual block ends **linear**, so the
+shortcut is added before the final activation and the identity path carries an
+unmodified signal.
+
+## Selection metric implementation
+
+Metrics accumulate into one on-device confusion matrix, so accuracy, macro F1,
+balanced accuracy and weighted F1 are all guaranteed to describe the same
+predictions. Every headline figure is verified against scikit-learn.
+
+**Macro-averaging convention.** A class with no predictions contributes **zero**
+to the macro average rather than being dropped. This is the stricter reading: a
+model that abandons a rare class should not be rewarded by having that class
+silently excluded. `full102` validation has classes with as few as seven images,
+so the choice is not hypothetical. A worked case in the tests scores 87.2%
+accuracy against 0.45 macro F1, which is exactly the gap the metric exists to
+expose.
+
+Balanced accuracy is the one exception: it averages recall over classes actually
+**present** in the split, since a class absent from a split has no recall to
+average and counting it as zero would penalise the model for the split's
+composition rather than its predictions.
+
+## Label-smoothing loss floor
+
+With smoothing `eps` over `C` classes the minimum achievable cross-entropy is
+the **entropy of the smoothed target**, not zero:
+
+| `eps` | classes | floor |
+| --- | --- | --- |
+| 0.1 | 10 | 0.5003 |
+| 0.1 | 102 | 0.7799 |
+| 0.05 | 10 | 0.2824 |
+
+`label_smoothing_loss_floor` computes this and the tests verify it against a
+direct numerical minimisation of the real loss. It matters for the Phase 6
+overfit gate: a converged model reached 0.5038 against a floor of 0.5003, and a
+"near zero" target would have reported that healthy model as broken.
+
+## Checkpoint provenance
+
+Every checkpoint embeds its scope, class count, class-mapping version, manifest
+version, preprocessing version and fingerprint, model configuration, epoch,
+seed, environment and Git revision. `load_checkpoint` verifies all of it
+**before** copying any weight, so a mismatch cannot leave a half-populated
+network behind.
+
+Loading a `rice10` checkpoint under `full102` raises. This is the single most
+important guard in the vision layer: a silently mismatched checkpoint does not
+crash, it produces confident and wrong pest identifications. Writes are atomic
+with an `fsync`, since a checkpoint can represent hours of GPU time.
+
 ## Results
 
-_No training has been run. This section is populated in Phases 6-9._
+_No real experiment has been run. Phase 6 established the pipeline; Phases 7-9
+produce the results. The smoke figures below are from capped runs and are
+**meaningless as measurements** — they exist only to prove the machinery works._
+
+| Scope | Model | Overfit check (8 images, 100 steps) | One capped epoch |
+| --- | --- | --- | --- |
+| rice10 | custom_cnn | loss 2.3565 -> 0.5038 (floor 0.5003), batch accuracy 1.00 | val macro F1 0.032, acc 0.154 |
+| full102 | custom_cnn | loss 4.6200 -> 0.7937 (floor 0.7799), batch accuracy 1.00 | val macro F1 0.005, acc 0.113 |
+| rice10 | baseline_cnn | — | val macro F1 0.078, acc 0.242 |
+
+Both scopes drive a small batch to within 0.004 of the theoretical loss floor
+and reach 100% accuracy on it, which is what proves gradients reach every
+parameter.
+
+Measured training throughput was ~90 img/s on `rice10` at batch size 16 on the
+RTX 4070 Laptop, against the ~1,367 img/s the loader sustains — confirming again
+that data loading is not the bottleneck.
