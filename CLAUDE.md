@@ -49,6 +49,49 @@ At the end of a phase, report:
 
 Then stop and wait for approval.
 
+## Codex MCP delegation
+
+The project exposes Codex through the `codex` MCP server configured in
+`.mcp.json`. Delegate substantial, bounded implementation or review tasks when
+doing so is useful, but retain responsibility for reviewing and verifying the
+result.
+
+When starting a Codex task:
+
+- Use the `codex` MCP tool and set `cwd` to the repository root.
+- Set `sandbox` to `workspace-write` and `approval-policy` to `never`.
+- Pass developer instructions requiring Codex to read and follow this
+  `CLAUDE.md`, including its startup checks, phase gates, dataset safety and Git
+  restrictions.
+- Give Codex a concrete scope, expected files, acceptance criteria and relevant
+  verification commands.
+- Wait for Codex to finish before editing any of the same files. Do not run
+  concurrent writers against one working tree.
+- Inspect the resulting diff and run proportionate verification before
+  accepting the work.
+
+Use `codex-reply` with the returned thread ID when Codex needs to correct or
+continue the same delegated task. Do not grant `danger-full-access` or bypass
+sandboxing for project work.
+
+### Token-efficient delegation
+
+Delegate only substantial, self-contained implementation or review tasks.
+
+Require Codex to:
+- Edit and test files directly in the workspace.
+- Return only a concise summary, changed-file list, verification results,
+  remaining risks, and thread ID.
+- Never return complete file contents, large diffs, or verbose command logs unless
+  specifically requested.
+
+After delegation:
+- Inspect `git diff --stat` first.
+- Review only relevant changed sections and failed verification output.
+- Do not reread entire files or repeat Codex's repository investigation unless
+  the change is high risk or the evidence is insufficient.
+- Use `codex-reply` for corrections instead of starting a new Codex session.
+
 ## Git safety
 
 This branch is experimental and will not be merged directly into `main`.

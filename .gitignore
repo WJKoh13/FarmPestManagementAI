@@ -51,6 +51,9 @@ htmlcov/
 build/
 dist/
 
+# Claude Code
+.claude
+
 # Editors / OS
 .vscode/
 .idea/
