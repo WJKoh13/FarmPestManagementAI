@@ -74,20 +74,52 @@ from farm_pest_ai.vision.training import (
 Problems = list[str]
 
 
+#: The shipped configuration that defines each architecture. The gate builds
+#: each one from its own file rather than from ``ModelConfig`` defaults: the
+#: defaults are a four-stage 3.36M-parameter baseline, while
+#: ``model_baseline.yaml`` ships a three-stage 1.15M one. Reporting the default
+#: shape here would describe an architecture no experiment will ever train.
+MODEL_CONFIG_FILES = {
+    "baseline_cnn": "model_baseline.yaml",
+    "custom_cnn": "model_custom.yaml",
+}
+
+
+def shipped_model_config(name: str, config: Config) -> ModelConfig:
+    """Resolve an architecture from its shipped configuration file.
+
+    The active scope and seed are carried across so the resolved width matches
+    the run being smoke-tested, while every architectural field comes from the
+    file that an experiment would actually use.
+    """
+    from farm_pest_ai.config import load_config
+
+    filename = MODEL_CONFIG_FILES.get(name)
+    if filename is None:
+        return ModelConfig(name=name, num_classes=config.num_classes)
+    shipped = load_config(
+        filename, overrides={"dataset": {"scope": config.dataset.scope_name}}
+    )
+    return model_config_from_config(shipped)
+
+
 def check_architectures(config: Config, problems: Problems) -> dict[str, Any]:
     """Build every architecture for the active scope and check its contract.
 
     Confirms the output width equals the scope's class count, that the logits
     are raw (no softmax hidden in the model), and that a wrong-scope model is
     rejected.
+
+    Each architecture is built from its **shipped** configuration, so the shape
+    and parameter count reported here are the ones a real experiment trains.
     """
     expected = config.num_classes
     scope = config.dataset.scope
     results: dict[str, Any] = {}
 
     for name in MODEL_NAMES:
-        model_config = ModelConfig(name=name, num_classes=expected)
         try:
+            model_config = shipped_model_config(name, config)
             model = build_model(model_config, scope=scope)
         except ModelError as exc:
             problems.append(f"{name}: failed to build for scope {scope.name}: {exc}")
@@ -113,6 +145,8 @@ def check_architectures(config: Config, problems: Problems) -> dict[str, Any]:
             )
 
         results[name] = {
+            "config_file": MODEL_CONFIG_FILES.get(name, "<defaults>"),
+            "stage_channels": list(model_config.stage_channels),
             "parameters": summary["parameters"],
             "parameter_memory_mib": summary["parameter_memory_mib"],
             "output_shape": summary["output_shape"],

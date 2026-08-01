@@ -5,15 +5,16 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 | Field | Value |
 | --- | --- |
 | Current phase completed | **Phase 6 — Custom CNN and smoke training** |
+| Phase 7 state | **Prepared, awaiting approval to launch the two runs** |
 | Next phase | Phase 7 — rice10 development experiments |
 | Branch | `zy_CNN` |
 | Active default scope | `rice10` (switchable to `full102`) |
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | 601 passed (428 through Phase 5, plus 173 vision tests) |
+| Test suite | 636 passed (601 through Phase 6, plus 35 Phase 7 tests) |
 | Lint / types | `ruff` clean, `mypy` clean |
-| Models | `baseline_cnn` 3.36M params, `custom_cnn` 1.44M params (rice10) |
+| Models (as shipped) | `baseline_cnn` 1.15M params, `custom_cnn` 1.44M params (rice10) |
 | Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
 | Derived manifests | Built for both scopes, idempotent, verified against source |
 | Preprocessing version | `1.0.0`, fingerprint `9e75177ab60f96e0` (identical for both scopes) |
@@ -229,11 +230,16 @@ No real experiment was run, no hyperparameter was selected, and the test split
 was never opened.
 
 **Two architectures, both from primitive layers.** `baseline_cnn` is a plain
-conv-BN-ReLU control at 3,363,530 parameters; `custom_cnn` is residual
-depthwise-separable with squeeze-and-excitation and stochastic depth at
-**1,435,242** — 2.3x smaller despite being deeper, because its convolutions are
-factorised. Whether that buys accuracy is a Phase 7 question. `torchvision.models`
-and pretrained weights are imported nowhere.
+conv-BN-ReLU control; `custom_cnn` is residual depthwise-separable with
+squeeze-and-excitation and stochastic depth at **1,435,242** parameters.
+`torchvision.models` and pretrained weights are imported nowhere.
+
+> **Corrected in Phase 7.** This entry originally reported `baseline_cnn` at
+> 3,363,530 parameters and called `custom_cnn` "2.3x smaller". Both were wrong.
+> That count came from `ModelConfig` field defaults, which are `custom_cnn`'s
+> four-stage widths, not from `model_baseline.yaml`, which ships three stages.
+> The shipped baseline is **1,148,874** parameters, so the control is the
+> *smaller* of the two by 1.25x. See the Phase 7 entry.
 
 **Gradients are proven to flow, not assumed.** The gate trains one 8-image batch
 for 100 steps and requires the loss to collapse. This is the check that
@@ -289,6 +295,90 @@ read as a result.
 
 173 tests were added across five files, 11 of which read the real dataset. The
 suite is 601 passing, with `ruff` and `mypy` clean.
+
+### Phase 7 — rice10 development experiments (prepared, not yet run)
+
+Built the real experiment entry point and the controlled comparison it will run.
+**No training run has been launched**: both arms are planned, measured and
+awaiting approval. No test split was built or read.
+
+**`scripts/train.py` is the entry point for every real experiment.**
+`smoke_train.py` is explicitly not an alternative, and the new script refuses to
+become one: a configuration carrying a `smoke` section is rejected, and so is a
+trainer holding either batch cap or the `smoke` marker. Three properties are
+checked before the first batch, each against what the loaders actually produced
+rather than against configuration — full split coverage against the manifest row
+counts on disk, no test loader or dataset in the bundle, and no silent CPU
+fallback. `--plan` resolves everything, measures a dozen real batches and exits
+without training or writing a checkpoint.
+
+**The test-split exclusion is now checked twice.** `build_loaders` omits it
+unless named, and `assert_no_test_split` re-checks the resulting bundle. The
+duplication is deliberate: a leaked test loader produces a perfectly plausible
+number that would silently invalidate every decision made after it, and nothing
+downstream would notice. The script also exposes no flag that could name the
+test split, which a test pins.
+
+**AMP skipped steps are now a logged quantity.** `EpochResult` carries
+`optimizer_steps`, `amp_skipped_steps` and `amp_final_scale`; each appears in
+`metrics.jsonl` and in the epoch log line, and the run summary keeps both the
+run total and the per-epoch series. Keeping the series is what makes the
+distinction usable: a handful of skips in epoch 1 is scale calibration, while a
+total that keeps climbing means batches contributed no learning at all while the
+loss curve still looked plausible. Phase 6 found this interaction by inspection;
+it is no longer something that has to be noticed.
+
+**New finding — the recorded `baseline_cnn` size was wrong, and the error
+inverted the comparison.** `ModelConfig`'s field defaults are `custom_cnn`'s
+four-stage widths `[64, 128, 256, 384]`. `smoke_train.py` built each
+architecture as `ModelConfig(name=...)`, so it constructed a **four-stage**
+`baseline_cnn` that no configuration file describes and reported it at 3,363,530
+parameters. The shipped `model_baseline.yaml` has three stages and **1,148,874**
+parameters.
+
+| | Phase 6 reported | As shipped |
+| --- | --- | --- |
+| `baseline_cnn` rice10 | 3,363,530 (4 stages) | **1,148,874** (3 stages) |
+| `baseline_cnn` full102 | 3,457,382 | **1,172,518** |
+| `custom_cnn` rice10 | 1,435,242 | 1,435,242 (unchanged) |
+
+So the control is not 2.3x larger than `custom_cnn` — it is **1.25x smaller**.
+The Phase 6 full102 figure, 3,457,382, matches neither build and appears to have
+been transcribed rather than measured. `smoke_train.py` now builds each
+architecture from its own configuration file and records the `stage_channels` it
+used, so the shape it reports is the shape that gets trained, and tests pin both
+the three-stage shape and the exact count. This matters for Phase 7 rather than
+being cosmetic: at 1.25x the two arms are close enough that a difference is
+attributable to architecture, whereas at 2.3x it would have been partly a
+capacity result.
+
+**The shipped model configs are not a controlled comparison.** Layered on their
+own they differ in learning rate (0.001 vs 0.002), epochs (60 vs 80), warmup
+(3 vs 5), label smoothing (0.05 vs 0.1) and patience (12 vs 15), so a win could
+be attributed to any of five differences. `configs/exp_rice10_protocol_a.yaml`
+states the whole `training` section and is layered second, overriding both. The
+resolved training configs for the two arms were verified equal field by field;
+the only difference is `model.name`. Learning rate is the midpoint, 0.0015 —
+neither arm gets its own tuned value, since tuning one and not the other
+reintroduces the confound the file exists to remove.
+
+**Both arms planned and measured on the real data** (RTX 4070 Laptop, batch 64,
+AMP on, full 4,318 train / 721 validation, 67 + 12 batches, test never built):
+
+| Arm | Parameters | s/step | img/s | Peak step VRAM | Estimated |
+| --- | --- | --- | --- | --- | --- |
+| `baseline_cnn` | 1,148,874 | 0.158 | 404 | 1,991 MiB | ~11.4 min / 60 epochs |
+| `custom_cnn` | 1,435,242 | 0.053 | 1,195 | 852 MiB | ~3.8 min / 60 epochs |
+
+The custom model is **3x faster per step and uses 2.3x less peak VRAM** despite
+having 25% more parameters — factorised convolutions cost far fewer FLOPs and
+activations than the baseline's dense `3x3` stack. Parameter count is a poor
+proxy for either cost here.
+
+35 tests were added across three files (`test_train_script.py`,
+`test_train_script_integration.py`, plus additions to `test_shipped_configs.py`),
+of which 5 read the real dataset. The suite is 636 passing, with `ruff` and
+`mypy` clean.
 
 ## Verified invariants
 
@@ -358,6 +448,23 @@ These are enforced by tests and re-checked every phase.
   never predicts scores zero in the macro average rather than being excluded.
 - Smoke-run checkpoints and metrics are marked `smoke: true`, and the run
   directory is deleted unless `--keep-run` is passed.
+- A real experiment runs only through `scripts/train.py`, which refuses a
+  configuration carrying a `smoke` section and refuses a trainer holding either
+  batch cap or the `smoke` marker.
+- A training run uses the entire train and validation splits: each dataset's
+  length is compared against its derived manifest's row count on disk, and a
+  subset aborts the run.
+- A training run never builds a test loader. `build_loaders` is called with
+  exactly `("train", "validation")`, the resulting bundle is re-checked to carry
+  nothing else, and no CLI flag can name the test split.
+- Every epoch records `optimizer_steps`, `amp_skipped_steps` and
+  `amp_final_scale`, and the run summary keeps both the total and the per-epoch
+  series, so calibration skips are distinguishable from a persistent problem.
+- The two architectures in a comparison resolve to identical training configs;
+  a difference in any training field fails a test rather than producing an
+  uninterpretable result.
+- Each architecture's reported shape and parameter count come from its shipped
+  configuration file, never from `ModelConfig` field defaults.
 
 ## Open risks
 
@@ -381,9 +488,12 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 14 | **New in Phase 5**: training-run reproducibility is conditional on a fixed `runtime.num_workers`. Changing the worker count changes how per-worker RNG streams interleave, so the exact augmentations drawn differ. Evaluation is unaffected | 7, 8 |
 | 15 | **New in Phase 5**: normalisation uses ImageNet constants as fixed numbers rather than statistics measured on IP102. Changing them requires bumping `dataset.preprocessing_version` | 7 |
 | 16 | **New in Phase 6**: no architecture or hyperparameter has been tuned. Learning rate, batch size, epochs, augmentation strength and the two architectures' widths and depths are all untested defaults. The smoke figures are not evidence of anything | 7, 8 |
-| 17 | **New in Phase 6**: `custom_cnn` is 2.3x smaller than `baseline_cnn` but has never been compared to it on a real run. The control may yet win, in which case the extra complexity is not earning its place | 7 |
-| 18 | **New in Phase 6**: AMP skipping optimiser steps during scale calibration is handled, but the interaction was found by inspection rather than by a test that would catch a regression in torch's scaler behaviour | 7 |
+| 17 | **Restated in Phase 7**: `custom_cnn` has 1.25x *more* parameters than the shipped `baseline_cnn`, not 2.3x fewer — the Phase 6 figure was measured against `ModelConfig` defaults. Neither has been compared on a real run. The control may yet win, in which case the extra complexity is not earning its place | 7 |
+| 18 | **Partly addressed in Phase 7**: AMP skipped steps are now counted per epoch, logged and summarised, so a regression in torch's scaler behaviour is visible in the metrics. There is still no test that forces an overflow and asserts the schedule holds back | 7, 8 |
 | 19 | **New in Phase 6**: full training reproducibility is untested end to end. Seeds, worker streams and RNG-state resumption are all implemented and unit-tested, but no two full runs have been compared for bit-identical results | 7 |
+| 20 | **New in Phase 7**: the runtime estimate models the validation pass as 40% of a training step per batch. That ratio is assumed, not measured; the first real run will show how close it is | 7 |
+| 21 | **New in Phase 7**: free VRAM measured from inside a CUDA context (7,014 MiB) disagrees with `nvidia-smi` before the process starts (4,838 MiB), because Windows evicts idle desktop allocations under demand. Planning uses the conservative `nvidia-smi` figure; peak step VRAM of 1,991 MiB fits either way, but a larger batch size must be planned against the lower number | 8 |
+| 22 | **New in Phase 7**: the shared protocol uses the midpoint learning rate 0.0015 for both arms, so neither is at its own optimum. This is deliberate — it is what makes the comparison controlled — but it means the comparison establishes which architecture is better *at a common setting*, not which has the higher achievable ceiling | 7, 8 |
 
 ## Rules in force
 

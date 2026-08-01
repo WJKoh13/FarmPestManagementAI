@@ -23,6 +23,7 @@ STANDALONE = [
     "model_baseline.yaml",
     "model_custom.yaml",
     "smoke_test.yaml",
+    "exp_rice10_protocol_a.yaml",
     "app.yaml",
     "llm.yaml",
 ]
@@ -158,6 +159,112 @@ def test_app_config_defaults_are_safe(configs_dir: Path) -> None:
     assert config.get("safety.degrade_gracefully_without_llm") is True
     assert config.get("safety.require_source_for_dosage") is True
     assert config.get("inference.checkpoint") is None  # set only after Phase 9
+
+
+def test_the_rice10_comparison_holds_the_protocol_identical(configs_dir: Path) -> None:
+    """The two architectures must differ only in the architecture.
+
+    This is what makes the Phase 7 result interpretable. Layered on their own,
+    ``model_baseline.yaml`` and ``model_custom.yaml`` differ in learning rate,
+    epochs, warmup, label smoothing and patience, so a win could be attributed
+    to any of five things. ``exp_rice10_protocol_a.yaml`` is layered second and
+    states the whole ``training`` section, which overrides both. If a future
+    edit reintroduces a difference, this fails rather than producing a
+    comparison that quietly means nothing.
+    """
+    from farm_pest_ai.vision.models import model_config_from_config
+    from farm_pest_ai.vision.training import training_config_from_config
+
+    experiment = config_path(configs_dir, "exp_rice10_protocol_a.yaml")
+    resolved = {
+        name: load_config([config_path(configs_dir, name), experiment])
+        for name in ("model_baseline.yaml", "model_custom.yaml")
+    }
+
+    baseline, custom = resolved["model_baseline.yaml"], resolved["model_custom.yaml"]
+
+    # Identical protocol, down to every field the trainer reads.
+    assert (
+        training_config_from_config(baseline).to_dict()
+        == training_config_from_config(custom).to_dict()
+    )
+    # Identical data handling: same scope, seed, image size and preprocessing.
+    for key in (
+        "dataset.scope",
+        "dataset.image_size",
+        "reproducibility.seed",
+        "preprocessing.augmentation",
+        "runtime.amp",
+    ):
+        assert baseline.get(key) == custom.get(key), f"{key} differs between the arms"
+
+    # And the one thing that must differ.
+    assert model_config_from_config(baseline).name == "baseline_cnn"
+    assert model_config_from_config(custom).name == "custom_cnn"
+    assert baseline.num_classes == custom.num_classes == 10
+
+
+def test_the_shipped_baseline_is_not_the_model_config_default(configs_dir: Path) -> None:
+    """The shipped baseline is three stages, not the four-stage default.
+
+    ``ModelConfig`` defaults to ``custom_cnn``'s four-stage widths, so building
+    ``ModelConfig(name="baseline_cnn")`` produces a 3.36M-parameter model that
+    no configuration file describes. ``model_baseline.yaml`` ships three stages
+    and 1.15M parameters, and that is what an experiment trains. Phase 6's
+    reported 3.36M came from the defaults; this test pins the distinction so
+    the two cannot be conflated again.
+    """
+    torch = pytest.importorskip("torch")
+    assert torch is not None
+
+    from farm_pest_ai.vision.models import (
+        ModelConfig,
+        build_model,
+        count_parameters,
+        model_config_from_config,
+    )
+
+    default = ModelConfig(name="baseline_cnn", num_classes=10)
+    shipped = model_config_from_config(
+        load_config(config_path(configs_dir, "model_baseline.yaml"))
+    )
+
+    assert len(shipped.stage_channels) == 3
+    assert list(shipped.stage_channels) == [64, 128, 256]
+    assert len(default.stage_channels) == 4
+    assert shipped.stage_channels != default.stage_channels
+
+    shipped_params = count_parameters(build_model(shipped, scope="rice10"))["total"]
+    assert shipped_params == 1_148_874
+
+
+def test_the_shipped_baseline_is_a_credible_control(configs_dir: Path) -> None:
+    """The control must be comparable in size to the model it is controlling.
+
+    A control an order of magnitude smaller or larger would make the Phase 7
+    comparison a capacity result rather than an architecture one. As shipped the
+    two are within 1.3x, with the baseline the *smaller* of the pair — which is
+    the opposite of the Phase 6 note that custom_cnn is 2.3x smaller, since that
+    compared against the four-stage default.
+    """
+    pytest.importorskip("torch")
+    from farm_pest_ai.vision.models import (
+        build_model,
+        count_parameters,
+        model_config_from_config,
+    )
+
+    counts = {
+        name: count_parameters(
+            build_model(
+                model_config_from_config(load_config(config_path(configs_dir, name))),
+                scope="rice10",
+            )
+        )["total"]
+        for name in ("model_baseline.yaml", "model_custom.yaml")
+    }
+    ratio = max(counts.values()) / min(counts.values())
+    assert ratio < 2.0, f"the two arms differ {ratio:.1f}x in size: {counts}"
 
 
 def test_llm_candidates_are_marked_unverified(configs_dir: Path) -> None:

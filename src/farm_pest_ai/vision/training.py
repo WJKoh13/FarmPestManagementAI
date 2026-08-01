@@ -58,11 +58,14 @@ if TYPE_CHECKING:  # pragma: no cover - import-time typing only
 
 __all__ = [
     "EpochResult",
+    "TrainPassResult",
     "Trainer",
     "TrainingConfig",
     "TrainingError",
     "build_optimizer",
     "build_scheduler",
+    "build_trainer",
+    "iter_epoch_records",
     "training_config_from_config",
 ]
 
@@ -345,6 +348,29 @@ def build_scheduler(
 
 
 @dataclass(frozen=True)
+class TrainPassResult:
+    """What one training pass produced, beyond its metrics.
+
+    Attributes:
+        metrics: Metrics accumulated over the augmented training batches.
+        seconds: Wall-clock time of the pass.
+        images_per_second: Training throughput.
+        optimizer_steps: Optimiser steps that actually applied.
+        amp_skipped_steps: Steps the gradient scaler skipped because the
+            gradients overflowed at the current loss scale.
+        amp_final_scale: The loss scale at the end of the pass, or ``None`` when
+            AMP is off.
+    """
+
+    metrics: ClassificationMetrics
+    seconds: float
+    images_per_second: float
+    optimizer_steps: int = 0
+    amp_skipped_steps: int = 0
+    amp_final_scale: float | None = None
+
+
+@dataclass(frozen=True)
 class EpochResult:
     """Everything recorded for one completed epoch.
 
@@ -360,6 +386,16 @@ class EpochResult:
         peak_vram_mib: Peak CUDA memory during the epoch, or ``None`` on CPU.
         improved: Whether the monitored metric improved this epoch.
         best_metric: Best monitored value seen so far.
+        optimizer_steps: Optimiser steps that actually applied this epoch.
+        amp_skipped_steps: Batches whose optimiser step AMP skipped because the
+            gradients overflowed at the current loss scale. A handful during the
+            first epoch is normal scale calibration; a count that stays high, or
+            reappears late in a run, means the loss scale is fighting the
+            gradients and those batches contributed no learning at all.
+        amp_final_scale: The gradient scaler's loss scale at the end of the
+            epoch, or ``None`` when AMP is off. Recorded alongside the skip
+            count because the two only make sense together: a scale that keeps
+            halving is what produces skips.
     """
 
     epoch: int
@@ -372,6 +408,9 @@ class EpochResult:
     peak_vram_mib: float | None = None
     improved: bool = False
     best_metric: float | None = None
+    optimizer_steps: int = 0
+    amp_skipped_steps: int = 0
+    amp_final_scale: float | None = None
 
     def to_dict(self, *, per_class: bool = False) -> dict[str, Any]:
         """Return the JSON Lines record written for this epoch."""
@@ -386,6 +425,9 @@ class EpochResult:
             "peak_vram_mib": self.peak_vram_mib,
             "improved": self.improved,
             "best_metric": self.best_metric,
+            "optimizer_steps": self.optimizer_steps,
+            "amp_skipped_steps": self.amp_skipped_steps,
+            "amp_final_scale": self.amp_final_scale,
         }
 
 
@@ -548,6 +590,9 @@ class Trainer:
         self.start_epoch = 1
         self.global_step = 0
         self.history: list[EpochResult] = []
+        # Cumulative across the run, so a resumed run's totals are per-epoch in
+        # `metrics.jsonl` and the run total is the sum of those records.
+        self.amp_skipped_steps = 0
 
     # -- setup ---------------------------------------------------------
 
@@ -598,7 +643,7 @@ class Trainer:
 
     # -- passes --------------------------------------------------------
 
-    def train_epoch(self, epoch: int) -> tuple[ClassificationMetrics, float, float]:
+    def train_epoch(self, epoch: int) -> TrainPassResult:
         """Run one training pass.
 
         Metrics are accumulated from the same augmented batches the model trains
@@ -607,7 +652,8 @@ class Trainer:
         it describes what the model actually saw.
 
         Returns:
-            The metrics, the elapsed seconds and the images-per-second rate.
+            A :class:`TrainPassResult` carrying the metrics, timing and the AMP
+            step accounting for this epoch.
         """
         loader = self.bundle.loaders["train"]
         self.model.train()
@@ -616,6 +662,8 @@ class Trainer:
         )
         started = time.perf_counter()
         images_seen = 0
+        stepped_count = 0
+        skipped_count = 0
 
         for batch_index, (images, targets) in enumerate(loader):
             if self.max_train_batches is not None and batch_index >= self.max_train_batches:
@@ -670,13 +718,26 @@ class Trainer:
                     )
                     self.scheduler.step()
                 self.global_step += 1
+                stepped_count += 1
+            else:
+                skipped_count += 1
 
             accumulator.update(logits.detach().float(), targets, loss=float(loss.detach()))
             images_seen += int(images.shape[0])
 
         elapsed = time.perf_counter() - started
         rate = images_seen / elapsed if elapsed > 0 else 0.0
-        return accumulator.compute(), elapsed, rate
+        self.amp_skipped_steps += skipped_count
+        return TrainPassResult(
+            metrics=accumulator.compute(),
+            seconds=elapsed,
+            images_per_second=rate,
+            optimizer_steps=stepped_count,
+            amp_skipped_steps=skipped_count,
+            amp_final_scale=(
+                float(self.scaler.get_scale()) if self.amp_enabled else None
+            ),
+        )
 
     @torch.no_grad()
     def evaluate(self, split: str = "validation") -> tuple[ClassificationMetrics, float]:
@@ -757,7 +818,8 @@ class Trainer:
             torch.cuda.reset_peak_memory_stats(self.device)
 
         for epoch in range(self.start_epoch, total_epochs + 1):
-            train_metrics, train_seconds, rate = self.train_epoch(epoch)
+            train_pass = self.train_epoch(epoch)
+            train_metrics = train_pass.metrics
             validation_metrics, validation_seconds = self.evaluate("validation")
 
             monitored = validation_metrics.get(self.config.early_stopping_metric)
@@ -774,24 +836,29 @@ class Trainer:
                 train=train_metrics,
                 validation=validation_metrics,
                 learning_rate=float(self.optimizer.param_groups[0]["lr"]),
-                train_seconds=train_seconds,
+                train_seconds=train_pass.seconds,
                 validation_seconds=validation_seconds,
-                images_per_second=rate,
+                images_per_second=train_pass.images_per_second,
                 peak_vram_mib=peak_vram,
                 improved=improved,
                 best_metric=self.early_stopping.best,
+                optimizer_steps=train_pass.optimizer_steps,
+                amp_skipped_steps=train_pass.amp_skipped_steps,
+                amp_final_scale=train_pass.amp_final_scale,
             )
             self.history.append(result)
             self._append_metrics(metrics_path, result)
 
             logger.info(
-                "epoch %d/%d loss=%.4f val_macro_f1=%.4f val_acc=%.4f lr=%.2e%s",
+                "epoch %d/%d loss=%.4f val_macro_f1=%.4f val_acc=%.4f lr=%.2e "
+                "amp_skipped=%d%s",
                 epoch,
                 total_epochs,
                 train_metrics.loss if train_metrics.loss is not None else float("nan"),
                 validation_metrics.macro_f1,
                 validation_metrics.accuracy,
                 result.learning_rate,
+                train_pass.amp_skipped_steps,
                 " *" if improved else "",
                 extra={
                     "event": "epoch",
@@ -799,6 +866,10 @@ class Trainer:
                     "scope": self.bundle.scope.name,
                     "macro_f1": validation_metrics.macro_f1,
                     "improved": improved,
+                    "optimizer_steps": train_pass.optimizer_steps,
+                    "amp_skipped_steps": train_pass.amp_skipped_steps,
+                    "amp_skipped_steps_total": self.amp_skipped_steps,
+                    "amp_final_scale": train_pass.amp_final_scale,
                 },
             )
 

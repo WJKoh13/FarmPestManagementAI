@@ -134,17 +134,37 @@ Both are built from primitive PyTorch layers in `farm_pest_ai.vision.blocks`. No
 `torchvision.models`, prebuilt architecture, pretrained weight or downloaded
 checkpoint is imported anywhere.
 
+As shipped in `configs/model_baseline.yaml` and `configs/model_custom.yaml`:
+
 | | `baseline_cnn` (Model A) | `custom_cnn` (Model B) |
 | --- | --- | --- |
 | Structure | 3 stages of conv-BN-ReLU x2 + max pool | Strided stem + 4 stages of residual separable blocks |
-| Parameters (rice10) | 3,363,530 | **1,435,242** |
-| Parameters (full102) | 3,457,382 | 1,470,662 |
-| Parameter memory | 12.84 MiB | **5.54 MiB** |
+| `stage_channels` | `[64, 128, 256]` | `[64, 128, 256, 384]` |
+| Parameters (rice10) | 1,148,874 | 1,435,242 |
+| Parameters (full102) | 1,172,518 | 1,470,662 |
+| Parameter memory (rice10) | 4.39 MiB | 5.54 MiB |
 
-Model B is **2.3x smaller** than the control despite being deeper, because its
-`3x3` convolutions are factorised into depthwise plus pointwise pairs. Whether
-that translates into a better validation macro F1 is a Phase 7 question; Phase 6
-only establishes that both build, train and checkpoint correctly.
+**Corrected in Phase 7.** Phase 6 recorded the baseline at 3,363,530 parameters
+and called Model B "2.3x smaller". Both figures were wrong, and for one reason:
+`ModelConfig`'s field defaults are Model B's four-stage widths, so
+`ModelConfig(name="baseline_cnn")` — which is how `smoke_train.py` built it —
+produces a **four-stage** baseline that no configuration file describes. The
+shipped baseline has three stages and 1.15M parameters. Measured against the
+architecture an experiment actually trains, the control is the **smaller** of
+the two, by 1.25x, not larger by 2.3x.
+
+The gate now builds each architecture from its own configuration file
+(`MODEL_CONFIG_FILES` in `scripts/smoke_train.py`) and records the
+`stage_channels` it used, so the shape it reports is the shape that gets
+trained. `tests/test_shipped_configs.py` pins both the three-stage shape and the
+1,148,874 count.
+
+The two are within 1.25x of each other, which is what makes the Phase 7
+comparison an architecture result rather than a capacity one. Model B is still
+the more parameter-efficient design per unit of depth, since its `3x3`
+convolutions are factorised into depthwise plus pointwise pairs — it is deeper
+than the control at only 1.25x the parameters. Whether that translates into a
+better validation macro F1 is the Phase 7 question.
 
 Model B's blocks add squeeze-and-excitation channel gating and stochastic depth
 that ramps linearly from 0 at the first block to `drop_path` at the last. The
@@ -202,6 +222,68 @@ Loading a `rice10` checkpoint under `full102` raises. This is the single most
 important guard in the vision layer: a silently mismatched checkpoint does not
 crash, it produces confident and wrong pest identifications. Writes are atomic
 with an `fsync`, since a checkpoint can represent hours of GPU time.
+
+## Phase 7 experiment entry point
+
+`scripts/train.py` runs every real experiment. `scripts/smoke_train.py` is not
+an alternative: it caps batches, runs one epoch and marks its artifacts
+`smoke: true` so its numbers can never be read as results. The real entry point
+refuses a configuration carrying a `smoke` section, and refuses a trainer that
+was handed either batch cap.
+
+Three properties are checked before the first batch, each against the state the
+loaders actually produced rather than against configuration:
+
+- **Full splits.** Each dataset's length is compared against the row count of
+  its derived manifest on disk. A subset — an accidental `Subset`, a rebuilt
+  smaller manifest — aborts the run instead of producing a full-looking
+  experiment over a fraction of the data.
+- **No test split.** `build_loaders` is called with exactly
+  `("train", "validation")`, and the resulting bundle is then asserted to carry
+  no other loader or dataset. The script exposes no flag that could name the
+  test split. It is evaluated once, in Phase 9.
+- **No silent CPU fallback.** An explicit CUDA request that cannot be satisfied
+  aborts; `--allow-cpu` is required to opt in.
+
+`--plan` resolves everything above, measures a dozen real batches for a runtime
+estimate, prints free VRAM, and exits **without training or writing a
+checkpoint**. That is the form to run before requesting approval.
+
+### AMP skipped-step accounting
+
+Every epoch records `optimizer_steps`, `amp_skipped_steps` and
+`amp_final_scale` in `metrics.jsonl`, and the run summary carries both the total
+and the per-epoch series. The two together are what distinguishes the expected
+case from the failure: a handful of skips in the first epoch is scale
+calibration, while a total that keeps climbing means batches are contributing no
+learning at all while the loss curve still looks plausible. Phase 6 found this
+interaction by inspection; it is now a logged quantity rather than something
+that has to be noticed.
+
+### Experiment 1: the controlled rice10 architecture comparison
+
+`configs/exp_rice10_protocol_a.yaml` holds one training protocol so the two
+architectures can be compared. It is layered **after** a model config and states
+the entire `training` section, which overrides whatever that file set:
+
+```
+scripts/train.py --config model_baseline.yaml --config exp_rice10_protocol_a.yaml
+scripts/train.py --config model_custom.yaml   --config exp_rice10_protocol_a.yaml
+```
+
+This is necessary because the shipped model configs are not comparable as
+written — `model_baseline.yaml` trains at lr 0.001 for 60 epochs with warmup 3,
+smoothing 0.05 and patience 12, while `model_custom.yaml` trains at lr 0.002 for
+80 epochs with warmup 5, smoothing 0.1 and patience 15. A win under those
+settings could be attributed to any of five differences. Under the shared
+protocol the only difference between the two runs is `model.name`, which
+`tests/test_shipped_configs.py` verifies by comparing the fully resolved
+training configs field by field.
+
+The learning rate is the midpoint of the two shipped values, 0.0015. Neither
+architecture is handed its own tuned rate: per-architecture tuning is a separate
+experiment, run only after the control is established, because tuning one arm
+and not the other reintroduces exactly the confound this file exists to remove.
 
 ## Results
 

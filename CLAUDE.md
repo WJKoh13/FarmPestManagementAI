@@ -251,6 +251,21 @@ that checkpoints round-trip and that cross-scope loading is refused. Its metrics
 are meaningless: artifacts are marked `smoke: true` and the run directory is
 deleted unless `--keep-run` is passed. It takes roughly one minute per scope.
 
+After Phase 7 built the experiment entry point:
+
+```bash
+python scripts/train.py --config model_custom.yaml --config exp_rice10_protocol_a.yaml --plan
+python scripts/train.py --config model_baseline.yaml --config exp_rice10_protocol_a.yaml --plan
+```
+
+`train.py` runs every real experiment; `smoke_train.py` must never be used for
+one. Before the first batch it verifies that both splits cover their entire
+derived manifest, that no test loader was built, and that no batch cap or smoke
+marker is set. `--plan` resolves the configuration, measures a dozen real
+batches for a runtime estimate, reports free VRAM and exits without training or
+writing a checkpoint. **Run `--plan` and obtain approval before launching a full
+run.**
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

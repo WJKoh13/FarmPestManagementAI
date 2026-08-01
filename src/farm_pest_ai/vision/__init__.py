@@ -48,9 +48,11 @@ from .training import (
     Trainer,
     TrainingConfig,
     TrainingError,
+    TrainPassResult,
     build_optimizer,
     build_scheduler,
     build_trainer,
+    iter_epoch_records,
     training_config_from_config,
 )
 
@@ -72,6 +74,7 @@ __all__ = [
     "ModelError",
     "ResidualSeparableBlock",
     "SqueezeExcite",
+    "TrainPassResult",
     "Trainer",
     "TrainingConfig",
     "TrainingError",
@@ -82,6 +85,7 @@ __all__ = [
     "build_trainer",
     "confusion_matrix",
     "count_parameters",
+    "iter_epoch_records",
     "last_checkpoint_path",
     "load_checkpoint",
     "load_model_for_inference",
