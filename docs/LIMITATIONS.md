@@ -68,9 +68,39 @@ Recorded honestly as they are discovered, not only at the end.
 - Dosage is provided only when an explicit verified source supplies it.
 - Severe or uncertain outbreaks warrant expert confirmation; the system says so.
 
+## Loader and preprocessing limitations (Phase 5)
+
+- **Aspect ratio is not preserved.** Evaluation resizes directly to 160x160,
+  distorting images whose aspect ratio is far from 1:1 — and the source spans
+  0.24 to 6.04. The alternative, resizing the shorter side and centre-cropping,
+  discards the frame edges where a small insect may sit. Keeping the whole frame
+  was judged the lesser loss, but it is a real distortion and
+  `preprocessing.resize_shorter_side` exists to test the other choice in
+  Phase 7.
+- **Upscaling cannot recover detail.** 6.3% of `rice10` training images and 4.0%
+  of `full102` are below 160 px on the short side and are enlarged. Bilinear
+  interpolation invents no information; it only avoids sharpening JPEG
+  artefacts the way bicubic would. Whether errors concentrate in this cohort is
+  a Phase 9 question.
+- **Alpha is discarded, not composited against a known background.** The seven
+  RGBA files are converted with Pillow's default, so a transparent region
+  resolves against black. All seven are ordinary photographs with an unused
+  alpha plane, so this is not expected to matter, but it is not verified
+  pixel by pixel.
+- **Normalisation uses the standard ImageNet constants**, chosen as fixed
+  numbers rather than measured on IP102. No pretrained weights are involved.
+  Statistics measured on the training split may fit the data better; changing
+  them requires bumping `dataset.preprocessing_version`.
+- **Augmentation strength is untuned.** Phase 5 fixed the mechanism, not the
+  magnitudes. The defaults are conservative guesses; Phase 7 tunes them against
+  validation macro F1.
+- **Determinism is guaranteed for evaluation, not for training.** The training
+  loader is reproducible given a fixed seed and worker count, but changing
+  `runtime.num_workers` changes how the per-worker RNG streams interleave and
+  therefore the exact augmentations drawn.
+
 ## To be added
 
-Populated in later phases: loader and augmentation caveats (5), architecture
-limitations (6-8), final model error analysis and calibration quality (9),
-knowledge coverage gaps (10), LLM hallucination and unsupported-claim rates
-(11), and deployment constraints (14).
+Populated in later phases: architecture limitations (6-8), final model error
+analysis and calibration quality (9), knowledge coverage gaps (10), LLM
+hallucination and unsupported-claim rates (11), and deployment constraints (14).

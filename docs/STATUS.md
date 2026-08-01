@@ -4,17 +4,18 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 4 — Full dataset audit and derived manifests** |
-| Next phase | Phase 5 — Data loader and preprocessing |
+| Current phase completed | **Phase 5 — Data loader and preprocessing** |
+| Next phase | Phase 6 — Custom CNN and smoke training |
 | Branch | `zy_CNN` |
 | Active default scope | `rice10` (switchable to `full102`) |
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | 246 passed (126 from Phase 3, plus 120 dataset tests) |
+| Test suite | 428 passed (246 through Phase 4, plus 182 loader tests) |
 | Lint / types | `ruff` clean, `mypy` clean |
-| Source data | Unmodified, read-only (reverified: 75,222 images) |
+| Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
 | Derived manifests | Built for both scopes, idempotent, verified against source |
+| Preprocessing version | `1.0.0`, fingerprint `9e75177ab60f96e0` (identical for both scopes) |
 
 ## Phase log
 
@@ -167,6 +168,57 @@ Three scripts were added: `build_manifests.py` (build, `--check`),
 (the content-level audit). 120 tests were added; the suite is 246 passing, with
 `ruff` and `mypy` clean.
 
+### Phase 5 — Data loader and preprocessing (complete)
+
+Built the path from a derived manifest to the tensor the CNN will consume:
+`transforms.py` (pixel decisions), `dataset.py` (manifest to tensors),
+`loaders.py` (DataLoader assembly and the rules it enforces), plus
+`scripts/verify_loader.py` as the Phase 5 gate. No training was run and no
+source file was touched.
+
+**Preprocessing decisions**, recorded in [TRAINING.md](TRAINING.md) with the
+reasoning: direct 160x160 resize (keeps the whole frame, since aspect ratios
+span 0.24-6.04), **bilinear** with antialiasing (most images are *downscaled* —
+median short side 250-320 px — so antialiasing matters more than the filter),
+ImageNet mean/std as fixed constants rather than pretrained weights, and
+unconditional RGB conversion.
+
+**The Phase 4 RGBA risk is closed.** RGB conversion is applied in two
+independent places — `load_image` at the decode boundary and the first step of
+every pipeline — so bypassing one still cannot produce a four-channel tensor.
+All ten real PNG-as-`.jpg` files were decoded and confirmed to yield exactly
+`(3, 160, 160)`, under both scopes, and tests pin them by filename.
+
+**Evaluation determinism is proven, not asserted.** `validation` and `test`
+share one pipeline containing no random step, and the verification script
+applies it twice to real images and compares tensors bit for bit. Two full
+passes over the validation loader also produce identical batches. Conversely,
+the training pipeline is checked to *actually vary* across eight draws — an
+augmentation config that silently stopped randomising would fail.
+
+**Training-only rules are enforced in code, not by convention.** Augmenting an
+evaluation split raises; deriving sampler or class weights from an evaluation
+split raises; `build_loaders` refuses class weighting when the training split
+was not requested, rather than back-filling from validation data. Evaluation
+loaders keep official manifest order with `drop_last=False`, so Phase 9 can join
+per-image predictions to the manifest by position. `build_loaders` omits `test`
+by default — a caller must name it explicitly.
+
+**Loader throughput measured.** Peak ~1,367 img/s on `rice10` train at 8
+workers, scaling monotonically from 2 and degrading at 12, which confirms the
+configured default. A first measurement suggested 4 workers beat 8; that was an
+artefact of a 5-batch warmup too short to amortise Windows spawn startup, and it
+reversed cleanly at 10 batches. Data loading remains far from the bottleneck.
+
+**New finding — an explicit-CUDA run now refuses to fall back to CPU.**
+`resolve_device(..., allow_cpu_fallback=False)` raises rather than silently
+turning an approved GPU run into a multi-day CPU one. This is exercised by
+patching CUDA availability, so the branch is tested on this machine *because*
+it has a GPU, not skipped for it.
+
+182 tests were added across four files, including 29 that read the real dataset.
+The suite is 428 passing, with `ruff` and `mypy` clean.
+
 ## Verified invariants
 
 These are enforced by tests and re-checked every phase.
@@ -194,6 +246,21 @@ These are enforced by tests and re-checked every phase.
   record for record; `verify_dataset.py` fails if they drift.
 - Manifest CSVs use LF endings and are byte-identical on any platform, so the
   build is verifiably idempotent.
+- Every decoded image reaches the model as exactly three channels. RGB
+  conversion happens at the decode boundary *and* as the first pipeline step,
+  and decoding dispatches on file content, never on the extension.
+- Validation and test preprocessing contains no random step and is bit-identical
+  across repeated application. Asking to augment an evaluation split raises.
+- Class weights and sampler weights are derived from the training split only;
+  requesting them from an evaluation split raises, and class weighting without
+  the training split raises rather than falling back to other data.
+- Evaluation loaders preserve official manifest order and never drop a batch, so
+  predictions join to the manifest by position.
+- `build_loaders` excludes the test split unless it is named explicitly.
+- An explicitly requested CUDA device never degrades silently to CPU when
+  `allow_cpu_fallback=False`.
+- The resolved preprocessing is fingerprinted; any change to size,
+  interpolation, normalisation or augmentation changes the fingerprint.
 
 ## Open risks
 
@@ -205,13 +272,17 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 2 | ~~Global `site-packages` polluted~~ **Closed in Phase 3.** venv resolves only its own `site-packages` | done |
 | 3 | VRAM is contended: 4,091 MiB free measured under desktop load versus 7,054 MiB when idle, of 8,188 MiB total. Training and Ollama must not share the GPU | 8, 14 |
 | 4 | ~~Docker GPU passthrough unverified~~ **Closed in Phase 3.** Verified with `nvidia/cuda:12.6.3-base-ubuntu22.04` under both `--gpus all` and `--runtime=nvidia` | done |
-| 5 | Images under 160 px on the short side are upscaled. **Quantified in Phase 4**: rice10 6.3/8.3/9.6%, full102 4.0/5.3/5.8% by split. Recorded, not yet analysed for error concentration | 5, 9 |
+| 5 | Images under 160 px on the short side are upscaled. **Quantified in Phase 4**: rice10 6.3/8.3/9.6%, full102 4.0/5.3/5.8% by split. **Phase 5 fixed the policy** (bilinear, antialiased) and confirmed the cohort still yields correct tensors; whether errors concentrate there is still open | 9 |
 | 6 | full102 imbalance is 82x; validation has classes with only 7 images, so macro F1 will be noisy. **Reconfirmed exhaustively in Phase 4** | 8 |
 | 7 | ~~Content-hash duplicates and cross-split leakage unmeasured~~ **Closed in Phase 4.** rice10 has 0 cross-split groups; full102 has 2 (4 files, ~0.009% of test). Recorded, not corrected | done |
 | 8 | Ollama is not installed | 11 |
 | 9 | `classes.txt` mixes common names and Latin binomials; taxonomy is preserved, not corrected | 10 |
-| 10 | **New in Phase 4**: ten `.jpg` files are really PNG and seven are RGBA (all IP102 label 56). The loader must convert to RGB explicitly, or the CNN receives a fourth channel | 5 |
+| 10 | ~~Ten `.jpg` files are really PNG and seven are RGBA~~ **Closed in Phase 5.** RGB conversion is applied at the decode boundary and again as the first pipeline step; all ten files verified to yield `(3, 160, 160)` under both scopes and pinned by tests | done |
 | 11 | **New in Phase 4**: near-duplicate leakage is still unmeasured. Byte hashing catches only exact copies, not re-encodes of the same photo. Perceptual hashing was not run | 8, 9 |
+| 12 | **New in Phase 5**: aspect ratio is not preserved — evaluation resizes directly to 160x160, distorting images far from 1:1 (source spans 0.24-6.04). The centre-crop alternative is configured but untested | 7 |
+| 13 | **New in Phase 5**: augmentation magnitudes are untuned guesses. Phase 5 fixed the mechanism, not the strength | 7 |
+| 14 | **New in Phase 5**: training-run reproducibility is conditional on a fixed `runtime.num_workers`. Changing the worker count changes how per-worker RNG streams interleave, so the exact augmentations drawn differ. Evaluation is unaffected | 7, 8 |
+| 15 | **New in Phase 5**: normalisation uses ImageNet constants as fixed numbers rather than statistics measured on IP102. Changing them requires bumping `dataset.preprocessing_version` | 7 |
 
 ## Rules in force
 

@@ -116,6 +116,40 @@ def test_smoke_config_is_bounded(configs_dir: Path) -> None:
     assert config.get("smoke.overfit_steps", 0) > 0
 
 
+@pytest.mark.parametrize("name", STANDALONE)
+def test_augmentation_is_never_promised_for_evaluation(
+    configs_dir: Path, name: str
+) -> None:
+    """Augmentation lives under `preprocessing.augmentation` and is train-only.
+
+    A config growing a `validation`/`test` augmentation key would be a silent
+    correctness bug, since evaluation preprocessing must stay deterministic.
+    """
+    data = yaml.safe_load(config_path(configs_dir, name).read_text(encoding="utf-8"))
+    preprocessing = data.get("preprocessing") or {}
+    assert "validation" not in preprocessing
+    assert "test" not in preprocessing
+
+
+def test_base_preprocessing_defaults(configs_dir: Path) -> None:
+    """Pin the Phase 5 preprocessing decisions against accidental edits."""
+    config = load_config(config_path(configs_dir, "base.yaml"))
+    assert config.get("preprocessing.interpolation") == "bilinear"
+    # null keeps the whole frame; a value here would centre-crop instead.
+    assert config.get("preprocessing.resize_shorter_side") is None
+    assert config.get("preprocessing.augmentation.enabled") is True
+    # Ground-referenced photographs: an inverted insect is not a real input.
+    assert config.get("preprocessing.augmentation.vertical_flip") == 0.0
+    # Pest identification leans on colour, so hue shifts stay small.
+    assert config.get("preprocessing.augmentation.color_jitter_hue") <= 0.05
+
+
+def test_evaluation_never_drops_a_batch(configs_dir: Path) -> None:
+    """drop_last is a training-only setting; the loader enforces the rest."""
+    config = load_config(config_path(configs_dir, "base.yaml"))
+    assert config.get("runtime.drop_last") is True
+
+
 def test_app_config_defaults_are_safe(configs_dir: Path) -> None:
     """Safety-relevant defaults must not silently drift."""
     config = load_config(config_path(configs_dir, "app.yaml"))

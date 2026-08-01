@@ -183,6 +183,17 @@ python scripts/audit_dataset.py --scope rice10
 `audit_dataset.py` decodes and hashes every image; `--scope full102` takes
 roughly ten minutes.
 
+After Phase 5 built the loader:
+
+```bash
+python scripts/verify_loader.py --scope rice10
+python scripts/verify_loader.py --scope full102 --report
+```
+
+`verify_loader.py` checks tensor shapes, the explicit RGB conversion, evaluation
+determinism and training-only augmentation. It omits the test split unless
+`--include-test` is passed, which is intended for Phase 9.
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

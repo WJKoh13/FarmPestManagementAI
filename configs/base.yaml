@@ -42,6 +42,43 @@ dataset:
     test: test.txt
   classes_file: classes.txt
 
+preprocessing:
+  # Resampling filter used by every resize. Bilinear with antialiasing: the
+  # Phase 4 audit measured a median short side of 250-320 px against a 160 px
+  # input, so most images are downscaled, where antialiasing matters more than
+  # the filter. The 4-10% that are upscaled gain nothing from bicubic beyond
+  # sharpened JPEG artefacts.
+  interpolation: bilinear
+  # null resizes straight to dataset.image_size, keeping the whole frame at the
+  # cost of aspect ratio. Set an integer to resize the shorter side and centre
+  # crop instead; that preserves aspect ratio but discards the frame edges,
+  # where a small insect may sit. Aspect ratios span 0.24-6.04, so cropping
+  # would be a real loss. Revisit in Phase 7 against validation macro F1.
+  resize_shorter_side: null
+  # Fixed normalisation constants, not pretrained weights. Phase 7 may replace
+  # them with statistics measured on the training split, which requires bumping
+  # dataset.preprocessing_version.
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+  # TRAINING SPLIT ONLY. Validation and test never see any of this.
+  augmentation:
+    enabled: true
+    random_resized_crop: true
+    scale: [0.6, 1.0]
+    ratio: [0.75, 1.3333]
+    horizontal_flip: 0.5
+    # Off: most photographs are ground-referenced, so an inverted insect is not
+    # a realistic input.
+    vertical_flip: 0.0
+    rotation_degrees: 15.0
+    color_jitter_brightness: 0.2
+    color_jitter_contrast: 0.2
+    color_jitter_saturation: 0.2
+    # Kept small: pest identification leans on colour, and a large hue shift
+    # destroys the signal it depends on.
+    color_jitter_hue: 0.02
+    random_erasing: 0.0
+
 reproducibility:
   seed: 1337
   deterministic: true
@@ -58,4 +95,7 @@ runtime:
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 4
+  # Training only. A short final batch gives BatchNorm too little to normalise
+  # over. Evaluation loaders never drop, so every image is scored exactly once.
+  drop_last: true
   amp: true

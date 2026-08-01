@@ -1,11 +1,17 @@
-"""Dataset manifests, audit and loading (Phases 4-5).
+"""Dataset manifests, audit, preprocessing and loading (Phases 4-5).
 
 :mod:`~farm_pest_ai.data.manifests` translates the read-only IP102 source files
 into scope-aware derived manifests. :mod:`~farm_pest_ai.data.audit` measures
 integrity, duplicates, cross-split leakage and image properties.
+:mod:`~farm_pest_ai.data.transforms` owns every pixel-level decision,
+:mod:`~farm_pest_ai.data.dataset` turns a manifest into tensors, and
+:mod:`~farm_pest_ai.data.loaders` assembles the ``DataLoader`` objects a
+training run consumes.
 
-Submodules are imported lazily so that ``audit``, which needs Pillow, does not
-become a hard import requirement for code that only builds manifests.
+Only the manifest layer is re-exported eagerly. ``audit`` needs Pillow, and
+``transforms``, ``dataset`` and ``loaders`` need torch and torchvision at call
+time, so importing this package stays cheap and possible in an environment
+without the training extras.
 """
 
 from __future__ import annotations

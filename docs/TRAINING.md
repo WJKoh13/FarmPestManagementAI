@@ -27,6 +27,51 @@ that experiments stay comparable.
   interpolation choice is a Phase 5 decision, recorded with the preprocessing
   version.
 
+## Preprocessing decisions (Phase 5)
+
+Implemented in `farm_pest_ai.data.transforms`, configured under `preprocessing`
+in `configs/base.yaml`, and fingerprinted so a silent change is detectable.
+
+| Decision | Value | Why |
+| --- | --- | --- |
+| Resize target | 160x160 direct | Keeps the whole frame. Aspect ratios span 0.24-6.04, so a centre crop would discard edges where a small insect may sit |
+| Interpolation | `bilinear`, antialiased | Median short side is 250-320 px against a 160 px input, so most images are **downscaled**, where antialiasing matters more than the filter. Bicubic would sharpen JPEG artefacts in the 4-10% that upscale |
+| Normalisation | ImageNet mean/std | Fixed constants, **not** pretrained weights. Training-split statistics are a Phase 7 option |
+| RGB conversion | Unconditional, at decode | The ten PNG-as-`.jpg` files, seven RGBA. Applied in both `load_image` and the pipeline, so bypassing one still cannot yield four channels |
+| Evaluation | One shared deterministic pipeline | `validation` and `test` are built separately but produce identical tensors, so they can never drift apart |
+
+Augmentation is **training-only** and deliberately conservative: random resized
+crop (scale 0.6-1.0), horizontal flip 0.5, rotation ±15°, mild colour jitter.
+Vertical flip is off — photographs are ground-referenced, so an inverted insect
+is not a realistic input. Hue jitter is capped at 0.02 because pest
+identification leans on colour. Magnitudes are untuned; Phase 7 fits them
+against validation macro F1.
+
+`preprocessing_version` (currently `1.0.0`) plus a 16-hex-character fingerprint
+of the resolved pipeline are recorded with every run, so two runs can be proven
+to have preprocessed identically.
+
+## Measured loader throughput (Phase 5)
+
+`rice10` training split, batch size 64 at 160x160, RTX 4070 Laptop / Ryzen 7
+8845HS, measured after a 10-batch warmup over 50 batches, twice per setting:
+
+| `num_workers` | Throughput |
+| --- | --- |
+| 2 | ~372 img/s |
+| 4 | ~685 img/s |
+| 6 | ~1,043 img/s |
+| **8 (configured)** | **~1,367 img/s** |
+| 12 | ~980 img/s |
+
+Throughput scales to a peak at 8 workers and degrades at 12, confirming the
+configured default. **Warmup matters on Windows**: with only a 5-batch warmup,
+8 workers appeared *slower* than 4, because spawn startup had not amortised.
+Any future benchmark must discard at least ten batches before timing.
+
+This is well above what one GPU consumes at this input size, so Phase 1's
+conclusion holds: data loading is not the bottleneck.
+
 ## Selection metric
 
 **Primary: validation macro F1.** Chosen over accuracy because both scopes are

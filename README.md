@@ -89,6 +89,12 @@ py -3.12 -m venv .venv
 # Inspect the fully resolved configuration
 .venv\Scripts\python.exe scripts/verify_environment.py --config data_full102.yaml --print-config
 
+# Check the derived manifests against the source data (fast, no image decoding)
+.venv\Scripts\python.exe scripts/verify_dataset.py --scope rice10
+
+# Check tensor shapes, RGB conversion, evaluation determinism and augmentation
+.venv\Scripts\python.exe scripts/verify_loader.py --scope rice10
+
 # Run the test suite, linter and type checker
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe -m ruff check src scripts tests

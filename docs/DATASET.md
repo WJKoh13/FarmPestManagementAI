@@ -216,11 +216,15 @@ found that this was a sampling artefact. **Ten files are actually PNG**, and
 All ten belong to **IP102 label 56**, and all ten decode without error, because
 Pillow dispatches on content rather than on the extension.
 
-Two consequences for Phase 5:
+Two consequences for Phase 5, both now **implemented and verified**:
 
-- The loader must not switch to an extension-based reader.
+- The loader must not switch to an extension-based reader. Decoding goes through
+  Pillow's content dispatch in `farm_pest_ai.data.dataset.load_image`.
 - It must convert to RGB explicitly. An RGBA image left alone would hand the CNN
-  a fourth input channel.
+  a fourth input channel. Conversion happens both at the decode boundary and as
+  the first step of every transform pipeline, so bypassing one still cannot
+  produce four channels. All ten files are confirmed to yield `(3, 160, 160)`
+  and are pinned by name in `tests/test_loader_integration.py`.
 
 These files are **not** renamed or re-encoded: the source tree is read-only. The
 filenames are pinned by tests in `tests/test_dataset_integration.py`.

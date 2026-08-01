@@ -10,8 +10,8 @@ stops and waits for `CONTINUE PHASE <n>`.
 | 2 | Project harness | **Complete** |
 | 3 | Python, Docker and CUDA environment | **Complete** |
 | 4 | Full dataset audit and derived manifests | **Complete** |
-| 5 | Data loader and preprocessing | Next |
-| 6 | Custom CNN and smoke training | Pending |
+| 5 | Data loader and preprocessing | **Complete** |
+| 6 | Custom CNN and smoke training | Next |
 | 7 | rice10 development experiments | Pending |
 | 8 | full102 experiment and scope selection | Pending |
 | 9 | Freeze and final CNN evaluation | Pending |
