@@ -247,10 +247,26 @@ def _safe_divide(numerator: Tensor, denominator: Tensor) -> Tensor:
     Used for precision, recall and F1: a class with no predictions has undefined
     precision, and the project's convention is to score that as zero rather than
     to exclude the class from the macro average.
+
+    The zero denominator is replaced *only* to keep the division itself finite;
+    the ``where`` then discards that branch's value entirely. A positive
+    denominator is always divided by unchanged, whatever its magnitude.
+
+    Corrected in Phase 7.1
+        This previously clamped the denominator to ``min=1`` before dividing.
+        For precision and recall that is invisible — their denominators are
+        integer counts, so a positive one is already at least 1. F1's
+        denominator is ``precision + recall``, a **fraction**, and clamping it
+        silently rewrote every value in ``(0, 1)`` as 1, under-reporting F1 for
+        exactly the weakest classes. Replacing only the zeros is what makes the
+        two cases behave the same way.
     """
+    safe_denominator = torch.where(
+        denominator > 0, denominator, torch.ones_like(denominator)
+    )
     return torch.where(
         denominator > 0,
-        numerator / denominator.clamp(min=1),
+        numerator / safe_denominator,
         torch.zeros_like(numerator),
     )
 

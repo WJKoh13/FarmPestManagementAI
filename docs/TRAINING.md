@@ -294,42 +294,103 @@ Both arms ran the full 4,318 train / 721 validation splits under
 `9e75177ab60f96e0`, from clean commit `5f169fc`. The test split was never built.
 **All figures below are validation figures.**
 
+> **Corrected in Phase 7.1.** Every F1 in this section was recomputed after a
+> defect was found in the shared safe-division helper, which clamped the F1
+> denominator `precision + recall` to a minimum of 1 and so under-reported F1
+> for every class whose precision and recall summed to less than 1. Both
+> **reported** and **corrected** figures are shown. Precision, recall, accuracy,
+> balanced accuracy and top-5 were never affected. See
+> [the correction](#the-phase-71-macro-f1-correction) below.
+
 | | `baseline_cnn` | `custom_cnn` |
 | --- | --- | --- |
 | Parameters | 1,148,874 | 1,435,242 |
-| **Validation macro F1** | 0.3837 | **0.5731** |
-| Validation accuracy | 0.4771 | **0.6075** |
-| Weighted F1 | 0.4147 | **0.5911** |
-| Balanced accuracy | 0.4354 | **0.5930** |
-| Top-5 accuracy | 0.8682 | **0.8849** |
-| Validation loss | 1.7427 | **1.5937** |
-| Best epoch | 58 | 58 |
+| **Validation macro F1 (corrected)** | 0.4314 | **0.5913** |
+| Validation macro F1 (as reported) | 0.3837 | 0.5731 |
+| Validation accuracy | 0.4771 | **0.6103** |
+| Weighted F1 (corrected) | 0.4573 | **0.6095** |
+| Balanced accuracy | 0.4354 | **0.5885** |
+| Top-5 accuracy | 0.8682 | **0.8821** |
+| Validation loss | 1.7427 | **1.5989** |
+| Best epoch (corrected metric) | 58 | 60 |
+| Best epoch (as reported) | 58 | 58 |
 | AMP skipped steps | 0 | 0 |
 | Optimiser steps | 4,020 | 4,020 |
 | Peak VRAM | 1,995 MiB | **858 MiB** |
 | Median epoch | 11.1 s | **4.9 s** |
 
-**`custom_cnn` wins by +0.1894 macro F1, a 1.49x improvement**, and it wins on
-**every one of the ten classes** — there is no class where the control is
-better, so this is not a trade-off between common and rare pests:
+**`custom_cnn` wins by +0.1600 corrected macro F1, a 1.37x improvement**, and it
+still wins on **every one of the ten classes** — there is no class where the
+control is better, so this is not a trade-off between common and rare pests:
 
 | Class | Support | `baseline_cnn` | `custom_cnn` | Δ |
 | --- | --- | --- | --- | --- |
 | rice leaf roller | 111 | 0.652 | 0.793 | +0.141 |
-| rice leaf caterpillar | 48 | 0.068 | 0.307 | +0.239 |
-| asiatic rice borer | 106 | 0.432 | 0.636 | +0.204 |
-| yellow rice borer | 50 | 0.506 | 0.583 | +0.077 |
-| rice gall midge | 51 | 0.558 | 0.720 | +0.162 |
-| brown plant hopper | 83 | 0.286 | 0.344 | +0.058 |
-| white backed plant hopper | 90 | 0.332 | 0.500 | +0.168 |
-| small brown plant hopper | 56 | 0.152 | 0.464 | +0.312 |
-| rice water weevil | 86 | 0.600 | 0.766 | +0.166 |
-| rice leafhopper | 40 | 0.251 | 0.619 | +0.368 |
+| rice leaf caterpillar | 48 | 0.171 | 0.366 | +0.194 |
+| asiatic rice borer | 106 | 0.462 | 0.650 | +0.188 |
+| yellow rice borer | 50 | 0.506 | 0.580 | +0.074 |
+| rice gall midge | 51 | 0.558 | 0.708 | +0.151 |
+| brown plant hopper | 83 | 0.378 | 0.414 | +0.036 |
+| white backed plant hopper | 90 | 0.407 | 0.516 | +0.109 |
+| small brown plant hopper | 56 | 0.225 | 0.481 | +0.256 |
+| rice water weevil | 86 | 0.600 | 0.779 | +0.179 |
+| rice leafhopper | 40 | 0.354 | 0.625 | +0.271 |
 
-Neither model left a class unpredicted. The largest gains are on the classes the
-control handled worst — rice leafhopper (+0.368), small brown plant hopper
-(+0.312) and rice leaf caterpillar (+0.239) — which is why the macro average
-moves further than accuracy does.
+All figures are corrected. Neither model left a class unpredicted. The largest
+gains are on the classes the control handled worst — rice leafhopper (+0.271),
+small brown plant hopper (+0.256) and rice leaf caterpillar (+0.194) — which is
+why the macro average moves further than accuracy does.
+
+**The correction narrowed the margin without changing the verdict.** The
+baseline gained +0.0476 macro F1 and the custom model only +0.0182, because the
+defect punished weak classes hardest and the baseline had more of them. The
+headline gap therefore falls from +0.1894 to +0.1600 (1.49x to 1.37x). Every
+qualitative Phase 7 conclusion survives: `custom_cnn` wins overall, wins on all
+ten classes, and does so at 2.3x less VRAM.
+
+Plots: `artifacts/plots/rice10_baseline_protocolA/`,
+`artifacts/plots/rice10_custom_protocolA/`,
+`artifacts/plots/comparison_macro_f1.png` and
+`artifacts/plots/comparison_per_class_f1.png`, regenerated with
+`python scripts/plot_results.py`.
+
+#### The Phase 7.1 macro F1 correction
+
+The shared `_safe_divide` helper in `farm_pest_ai.vision.metrics` clamped its
+denominator to `min=1` before dividing. For **precision and recall** that is a
+no-op — their denominators are integer counts, so a positive one is already at
+least 1 — which is why those two were always right, and why the existing
+scikit-learn agreement tests passed. **F1's denominator is `precision + recall`,
+a fraction.** Whenever that sum fell strictly between 0 and 1, the clamp replaced
+it with 1 and the class's F1 was divided by too large a number.
+
+The error is therefore one-directional: it could only ever **under-report**, and
+it bit hardest exactly where macro F1 is meant to be sensitive — the weak
+classes. A class with precision 0.10 and recall 0.20 scored 0.04 instead of
+0.133, a 3.3x under-report.
+
+The fix replaces only zero denominators, so the zero-division convention is
+unchanged and a positive denominator of any magnitude is divided by as-is.
+
+**The correction required no retraining.** Every run recorded per-class
+precision, recall and support alongside the F1 it derived, so each corrected
+value is an exact arithmetic recomputation from `metrics.jsonl`:
+
+```bash
+python scripts/correct_metrics.py --verify-checkpoints
+```
+
+The original artifacts are never modified; the report is written to
+`data/reports/phase7_metric_correction.json` with reported and corrected values
+side by side.
+
+**One consequence is not cosmetic.** Under the corrected metric `custom_cnn`'s
+best epoch moves from 58 to 60, so its saved `best.pt` holds **epoch 58** — the
+epoch the defective metric selected. That checkpoint was deliberately **not**
+rewritten: it is what the run actually chose, and re-pointing it would fabricate
+a selection that never happened. Any claim about "the best model" from that run
+must say which metric selected it. The baseline's best epoch is unchanged, so
+its `best.pt` is unaffected.
 
 **Risk 17 is resolved: the extra architectural complexity earns its place.**
 `custom_cnn` is better on every class, uses 2.3x less peak VRAM and trains 2.3x
@@ -337,12 +398,15 @@ faster per epoch, at 1.25x the parameters. Squeeze-and-excitation, residual
 connections and stochastic depth are carrying real weight here, not decoration.
 
 **Neither arm early-stopped, and both were still improving at the cap.** Best
-macro F1 landed at epoch 58 of 60 for both, with patience 15 never approached.
-The cosine schedule drove the learning rate to zero while both models were still
+corrected macro F1 landed at epoch 58 of 60 for the baseline and epoch **60 of
+60** for the custom model, with patience 15 never approached by either. The
+cosine schedule drove the learning rate to zero while both models were still
 gaining, so **60 epochs is undertrained for this protocol**. The comparison
 remains valid — both arms were cut off at the same point under the same schedule
 — but the absolute numbers are floors, not ceilings. Extending the budget is a
-protocol change that must apply to both arms equally.
+protocol change that must apply to both arms equally, which is what E1 below
+does. That the custom model's corrected best is the *very last* epoch makes the
+point more sharply than the reported figures did.
 
 **A 51-minute stall in the baseline run is not a training cost.** Epoch 34 took
 3,070 s against a median of 11.1 s; every other epoch was normal, AMP skipped
@@ -356,6 +420,150 @@ median 4.9 s/epoch.
 
 The plan estimates were otherwise accurate. Predicted peak VRAM 1,991 / 852 MiB
 against measured 1,995 / 858 MiB, within 0.7%.
+
+### Experiment 2 — rice10 screening (Phase 7.2, complete)
+
+Four one-variable-at-a-time experiments on `custom_cnn`, all on `rice10`, all
+selected on **corrected** validation macro F1, all at seed 1337. No arm built,
+inspected or evaluated the test split.
+
+| | Variable changed | Best macro F1 | Δ vs E0 | Best epoch | Wall clock |
+| --- | --- | --- | --- | --- | --- |
+| **E0** | *control* — 160px, 60 ep, crop 0.6–1.0 | 0.5913 | — | 60 / 60 | 5.7 min |
+| **E1** | longer budget, stretched cosine (100 ep) | 0.5978 | +0.0065 *ns* | 54 / 69 | 6.6 min |
+| **E2** | `dataset.image_size` 160 → 224 | **0.6052** | **+0.0138** | 59 / 60 | 7.9 min |
+| **E3** | `augmentation.scale` floor 0.6 → 0.8 | 0.5760 | −0.0153 | 44 / 60 | 5.6 min |
+
+Ranking **E2 > E1 > E0 > E3**. *ns* marks a difference below 0.01, which a single
+seed cannot separate from noise on a 721-image validation split.
+
+**E0 reproduced the corrected Phase 7 result exactly** — macro F1 0.591340 at
+epoch 60, **bit-identical across all 60 epochs** (max per-epoch delta 0.00000000)
+and identical per-class F1. This validates both the correction and the pipeline's
+end-to-end reproducibility at a fixed worker count, which had never been
+demonstrated before (risk 19).
+
+**The differences are small relative to within-run noise.** Epoch-to-epoch range
+over each run's last ten epochs is 0.008–0.021, which brackets E2's +0.0138
+advantage. Because "best epoch" is the maximum of a noisy series, it flatters
+whichever run had the luckiest epoch, so the late-run **mean** is the more
+conservative reading:
+
+| | best epoch | last-10 mean | last-10 sd |
+| --- | --- | --- | --- |
+| E0 | 0.5913 | 0.5832 | 0.0047 |
+| E1 | 0.5978 | 0.5708 | 0.0065 |
+| E2 | **0.6052** | **0.5993** | 0.0042 |
+| E3 | 0.5760 | 0.5686 | 0.0031 |
+
+**E2 is the only change that survives both readings.** Its late-run mean beats E0
+by +0.016 and it wins 7 of 10 classes. E1's peak advantage **inverts** under the
+mean (0.5708 against E0's 0.5832): its single good epoch at 54 was not
+representative. E3 is worse on both readings.
+
+**E1 is not evidence that 60 epochs was too few.** Given 100 epochs it stopped at
+**69** on patience 15, having peaked at 54 — so with a stretched cosine the model
+converges and then declines rather than being starved of budget. Note this does
+not contradict the Phase 7 finding: under the *60-epoch* cosine both arms were
+still climbing at the cap, because that schedule anneals the learning rate to
+zero by epoch 60. Stretching the schedule changes when the model settles, and
+once it can settle, it does so before epoch 60's equivalent point.
+
+**E3 answered its open question in the negative.** Raising the crop floor to 0.8
+*hurt* (−0.0153, and worst on both readings), so on rice10 the regularisation
+value of aggressive cropping outweighs the risk of cropping the subject out of
+frame. Risk 13 is partly addressed: the 0.6 floor is not obviously too
+aggressive, and moving it in this direction is not the improvement it looked
+like.
+
+Plots for each run, including confusion matrices, are in
+`artifacts/plots/<run_id>/` and duplicated into each run directory under
+`<run_dir>/plots/`. Comparison figures:
+`artifacts/plots/phase72_comparison_macro_f1.{png,svg}` and
+`phase72_comparison_per_class_f1.{png,svg}`. Report:
+`data/reports/phase72_experiment_comparison.json`.
+
+**Structured, explicable errors.** The E0 confusion matrix shows the residual
+errors are not diffuse: the three plant hoppers confuse one another (brown ↔
+white-backed ↔ small-brown, 16–25% leakage each way), the two borers swap
+(asiatic ↔ yellow, 12–16%), and rice leaf caterpillar leaks 21% into rice leaf
+roller. Each pair is a genuinely similar-looking taxon, so this is a model
+confusing lookalikes rather than a broken pipeline.
+
+#### Planning figures (measured before the runs)
+
+| | Fingerprint | Predicted peak VRAM | Measured peak VRAM |
+| --- | --- | --- | --- |
+| E0 | `9e75177ab60f96e0` | 852 MiB | 858 MiB |
+| E1 | `9e75177ab60f96e0` | 852 MiB | 858 MiB |
+| E2 | `3378a6f0570336b3` | 1,524 MiB | 1,529 MiB |
+| E3 | `e07f829a792b4962` | 852 MiB | 858 MiB |
+
+Every prediction landed within 0.7% of the measurement.
+
+Configs: `exp_rice10_protocol_a.yaml` (E0), `exp_rice10_e1_epochs100.yaml`,
+`exp_rice10_e2_224.yaml`, `exp_rice10_e3_crop08.yaml`. Each extends the E0
+protocol and overrides exactly one field; `tests/test_shipped_configs.py`
+resolves each config against E0 and **fails if more than one field differs**, so
+the one-variable property is enforced rather than asserted.
+
+**Why each experiment exists**
+
+- **E1 (100 epochs)** — both Phase 7 arms peaked at or beside the cap and neither
+  triggered early stopping, so both scores are floors. The cosine schedule is
+  defined over `training.epochs`, so raising the cap stretches the decay across
+  the whole run rather than appending a flat tail at lr ≈ 0. Length and schedule
+  shape are inseparable for a cosine; that is a property of the schedule, not a
+  confound being hidden.
+- **E2 (224x224)** — Phase 4 measured 28.9% of images below 224 px on the short
+  side against 4.0% below 160 px, so a larger input upscales far more data; set
+  against that, small subjects may simply not resolve at 160. Batch size stays at
+  64 because the measured 1,524 MiB fits well inside the conservative ~4.8 GiB
+  free figure (risk 21) — had it not fitted, lowering the batch size would have
+  made E2 a two-variable experiment, which is a result to report rather than
+  route around.
+- **E3 (crop 0.8–1.0)** — risk 13 records that augmentation magnitudes are
+  untuned guesses, and a 0.6 area floor can crop a small pest out of frame
+  entirely, leaving a label with no evidence. The direction is genuinely open:
+  weaker augmentation keeps the subject but regularises less, and the E0 train
+  curve ran well above validation.
+
+**Screening protocol.** Each of E1–E3 was compared against E0 on corrected
+validation macro F1. A combined **E4** recipe is proposed from whichever changes
+helped, and the final recipe is confirmed across **three seeds** — a single-seed
+difference on a 721-image validation split is not a result. 256x256 is considered
+**only** if 224 shows a meaningful gain over 160; without that evidence it is a
+cost with no argued benefit.
+
+The test split was never built by any of these runs.
+
+#### E4 recommendation (proposed, not run)
+
+**Recommended E4 = E2 alone: 224x224, 60 epochs, crop 0.6–1.0.**
+
+There is nothing to combine. Of the three variables screened, only the input size
+helped, so the "combined" recipe is the control plus that single change:
+
+- **Include 224x224.** The only change that improves both the peak (+0.0138) and
+  the more conservative late-run mean (+0.016), while winning 7 of 10 classes. It
+  costs ~1.8x the VRAM (1,529 vs 858 MiB) and ~39% more wall clock, both of which
+  fit comfortably.
+- **Exclude the 100-epoch budget.** E1's peak advantage inverts under the
+  late-run mean, and it stopped early at 69 epochs having peaked at 54 — evidence
+  that the extra budget is not being used, not that it helps.
+- **Exclude the 0.8 crop floor.** E3 was worse on every reading.
+
+**The three-seed confirmation is required before this is called a result.** E2's
+margin (+0.0138) sits inside the epoch-to-epoch range of the runs it is compared
+against (0.008–0.021), so a single seed cannot establish it. The confirmation
+should compare E0 and E2 at three seeds each and report the seed spread, not one
+number per arm.
+
+**256x256 is not yet justified.** The rule set before screening was to consider
+it only on a meaningful 224 gain. +0.0138 clears the stated 0.01 threshold but is
+within run noise, so the honest position is that the 160 → 224 gain is
+*suggestive but unconfirmed*. Deciding 256 before the three-seed confirmation
+would be building on the weaker of two available readings.
 
 ### Smoke figures (Phase 6, not results)
 

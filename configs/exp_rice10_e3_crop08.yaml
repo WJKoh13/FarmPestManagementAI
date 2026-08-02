@@ -1,0 +1,33 @@
+# Phase 7.2 experiment E3: gentler cropping, one variable changed.
+#
+# Risk 13 records that the augmentation magnitudes are untuned guesses. The
+# RandomResizedCrop scale is the most aggressive of them: at 0.6 the crop can
+# keep as little as 60% of the image area, and on a dataset where the pest is
+# often a small part of the frame, an aggressive crop can remove the subject
+# entirely and hand the model a label with no evidence for it. Raising the floor
+# to 0.8 halves the worst-case area loss.
+#
+# THE ONE VARIABLE: augmentation.scale [0.6, 1.0] -> [0.8, 1.0].
+#
+# The upper bound stays at 1.0 and every other augmentation — flip, rotation,
+# colour jitter, ratio — is inherited unchanged, so this isolates crop severity
+# rather than "less augmentation" in general.
+#
+# The direction is genuinely open. Weaker augmentation can help by keeping the
+# subject in frame, or hurt by reducing regularisation; E0's train curve ran
+# well above validation, which suggests there is overfitting for augmentation to
+# fight. That is exactly why it is measured rather than assumed.
+#
+# NOTE — this changes the preprocessing fingerprint. Augmentation applies to the
+# training split only, so evaluation preprocessing is untouched and E3 remains
+# directly comparable to E0 on the validation set.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_rice10_e3_crop08.yaml --plan
+
+extends: exp_rice10_protocol_a.yaml
+
+preprocessing:
+  augmentation:
+    scale: [0.8, 1.0]

@@ -4,15 +4,18 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 7 — rice10 development experiments** |
-| Next phase | Phase 8 — full102 experiment and scope selection |
-| Phase 7 result | `custom_cnn` **0.5731** vs `baseline_cnn` 0.3837 validation macro F1 |
+| Current phase completed | **Phase 7.3 — rice10 image-quality review complete** |
+| Next phase | E4 three-seed confirmation (**awaiting approval**), then Phase 8 |
+| Image review | 5,039 rice10 images queued (train + validation); **0 human decisions entered** |
+| Phase 7 result (corrected) | `custom_cnn` **0.5913** vs `baseline_cnn` 0.4314 validation macro F1 |
+| Phase 7 result (as reported) | `custom_cnn` 0.5731 vs `baseline_cnn` 0.3837 — under-reported, see Phase 7.1 |
+| Phase 7.2 best arm | **E2** (224x224) 0.6052, +0.0138 over E0 — inside run noise, unconfirmed |
 | Branch | `zy_CNN` |
 | Active default scope | `rice10` (switchable to `full102`) |
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | 636 passed (601 through Phase 6, plus 35 Phase 7 tests) |
+| Test suite | 752 passed (636 through Phase 7, plus 116 in Phase 7.1–7.3) |
 | Lint / types | `ruff` clean, `mypy` clean |
 | Models (as shipped) | `baseline_cnn` 1.15M params, `custom_cnn` 1.44M params (rice10) |
 | Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
@@ -426,6 +429,204 @@ proxy for either cost here.
 of which 5 read the real dataset. The suite is 636 passing, with `ruff` and
 `mypy` clean.
 
+### Phase 7.1 — Results integrity and visualisation (complete)
+
+Found and fixed a defect in the metric that every Phase 7 decision was made on,
+corrected the recorded results without retraining, and built the plotting entry
+point. **No original artifact was modified and no model was retrained.**
+
+**The defect.** `_safe_divide` in `vision/metrics.py` clamped its denominator to
+`min=1`. For precision and recall this is a no-op — their denominators are
+integer counts, so a positive one is already at least 1. **F1's denominator is
+`precision + recall`, a fraction**, so whenever that sum fell strictly between 0
+and 1 the clamp replaced it with 1 and the class's F1 was divided by too large a
+number. The error is one-directional: it could only **under-report**, and it bit
+hardest on the weakest classes, which is precisely where macro F1 is supposed to
+be sensitive. A class at precision 0.10 / recall 0.20 scored 0.04 against a true
+0.133 — a 3.3x under-report.
+
+**Why the existing tests missed it.** `tests/test_metrics.py` already compared
+macro, weighted and per-class F1 against scikit-learn and passed. Every case in
+its parameter list happened to produce classes whose precision and recall summed
+either to 0 or to at least 1, so the clamp never engaged. This is the useful
+lesson: the tests were real, the comparison was against the right oracle, and the
+defect still survived because no case exercised the one interval where the two
+implementations differ.
+
+**Corrected results.** The correction needed no GPU: every run recorded per-class
+precision, recall and support beside the F1 it derived, so each corrected value
+is exact arithmetic over `metrics.jsonl`.
+
+| | reported | corrected | Δ | best epoch |
+| --- | --- | --- | --- | --- |
+| `baseline_cnn` | 0.3837 | **0.4314** | +0.0476 | 58 (unchanged) |
+| `custom_cnn` | 0.5731 | **0.5913** | +0.0182 | 58 → **60** |
+
+**The Phase 7 verdict survives; the margin does not.** The baseline gained 2.6x
+more than the custom model, because the defect punished weak classes hardest and
+the baseline had more of them. The headline gap falls from **+0.1894 to +0.1600**
+(1.49x to 1.37x). `custom_cnn` still wins overall and still wins on all ten
+classes.
+
+**A checkpoint was deliberately left stale.** Under the corrected metric the
+custom run's best epoch moves to 60, so its `best.pt` holds epoch 58 — the epoch
+the defective metric chose. Rewriting it would fabricate a selection that never
+happened, so it was not rewritten; `correct_metrics.py --verify-checkpoints`
+reports the discrepancy instead, and both runs' checkpoints were verified to
+carry the right scope, class count and epoch.
+
+**New — `scripts/correct_metrics.py`** writes
+`data/reports/phase7_metric_correction.json` with reported and corrected values
+side by side, per epoch and per class, plus checkpoint verification.
+
+**New — `scripts/plot_results.py`** renders accuracy, corrected macro F1, loss,
+learning rate, per-class F1 and cross-run comparison figures as PNG **and** SVG
+under `artifacts/plots/`. Values are plotted raw, never smoothed; the best epoch
+and warm-up boundary are marked; accuracy and F1 axes are percentage-formatted
+and zero-based; and every figure uses a single y-axis. Where the correction
+changed a curve, the reported series is drawn behind it as a dashed ghost, so a
+plot shows what was claimed next to what is true rather than quietly replacing
+it.
+
+51 tests were added across `test_metrics.py`, `test_results.py` and
+`test_plots.py`, including one that reproduces the real epoch-1 confusion pattern
+from the custom run and pins both the corrected value and the value it replaces.
+
+### Phase 7.2 — Controlled rice10 experiments (E0–E3 complete)
+
+Four one-variable-at-a-time experiments, run one at a time, seed 1337. No arm
+built, inspected or evaluated the test split — verified from each run's summary
+by a test, not merely by intent.
+
+| | Variable changed | Best macro F1 | Δ vs E0 | Best epoch | Peak VRAM |
+| --- | --- | --- | --- | --- | --- |
+| E0 | *control*, corrected | 0.5913 | — | 60 / 60 | 858 MiB |
+| E1 | longer budget, stretched cosine | 0.5978 | +0.0065 *ns* | 54 / 69 | 858 MiB |
+| E2 | image size 160 → 224 | **0.6052** | **+0.0138** | 59 / 60 | 1,529 MiB |
+| E3 | crop scale floor 0.6 → 0.8 | 0.5760 | −0.0153 | 44 / 60 | 858 MiB |
+
+**E0 reproduced the corrected Phase 7 result bit-identically** — 0.591340 at
+epoch 60, max per-epoch delta **0.00000000** across all 60 epochs, identical
+per-class F1. The gating condition was met, and this also closes the
+never-demonstrated end-to-end reproducibility question in risk 19.
+
+**The one-variable property was enforced twice**: a test resolves each config
+against E0 and fails if more than one field differs, and each completed run's
+summary was re-checked to confirm only the intended field changed. Every VRAM
+prediction landed within 0.7% of measurement.
+
+**The differences are small relative to within-run noise.** Each run's last ten
+epochs span 0.008–0.021 in macro F1, which brackets E2's +0.0138 margin. Since
+"best epoch" is the maximum of a noisy series, the late-run mean is the more
+conservative comparison:
+
+| | best epoch | last-10 mean |
+| --- | --- | --- |
+| E0 | 0.5913 | 0.5832 |
+| E1 | 0.5978 | **0.5708** — inverts |
+| E2 | **0.6052** | **0.5993** |
+| E3 | 0.5760 | 0.5686 |
+
+**Only E2 survives both readings**, winning 7 of 10 classes. E1's advantage
+inverts entirely under the mean, and it stopped early at epoch 69 having peaked
+at 54 — so with a stretched cosine the model converges and then declines rather
+than being starved of budget. E3 was worse on every reading, answering its open
+question in the negative: aggressive cropping is doing useful regularisation on
+rice10.
+
+**Recommended E4 = E2 alone** (224x224, 60 epochs, crop 0.6–1.0). There is
+nothing to combine — only one variable helped. **The three-seed confirmation is
+required before this counts as a result**, because E2's margin sits inside the
+noise of the runs it is compared against. 256x256 remains unjustified until then.
+
+**A real bug was caught while plotting.** The confusion matrix was first computed
+by scoring each checkpoint through the *ambient* configuration, so E2 — trained
+at 224x224 — was scored through a 160x160 pipeline. It loaded without complaint,
+because `strict_preprocessing` defaults off, and produced a plausible but wrong
+matrix. `RunResults.preprocessing_config()` now rebuilds each run's own
+preprocessing and passes `strict_preprocessing=True`, so a mismatch raises
+instead. All five runs' rebuilt fingerprints were verified against their
+checkpoints, and a test pins the round-trip.
+
+**New — `scripts/compare_experiments.py`** ranks the arms on corrected macro F1,
+marks differences below 0.01 as noise, and writes
+`data/reports/phase72_experiment_comparison.json` plus the comparison figures.
+
+Confusion matrices are now produced for every run (`--confusion`), and figures
+are duplicated into each run directory (`--in-run-dir`). The E0 matrix shows the
+residual errors are structured rather than diffuse: the three plant hoppers
+confuse one another (16–25% each way), the two borers swap (12–16%), and rice
+leaf caterpillar leaks 21% into rice leaf roller — all genuinely similar-looking
+taxa.
+
+### Phase 7.3 — Image-quality review (complete)
+
+Built a read-only audit that **proposes and never decides**. `ip102_v1.1` is
+opened read-only; two tests verify that measuring an image and building a contact
+sheet leave the source file byte-identical. The test split cannot be reviewed —
+`--split` does not offer it and the script re-checks.
+
+**Only `blurry` and `low_resolution` are asserted automatically**, since only
+those are measurable from pixels. The other eight categories need human
+judgement and are at most *suggested*; `reviewer_decision` and `reviewer_notes`
+ship empty, and reading back a manifest rejects any decision outside the ten
+categories.
+
+**Complete coverage of both reviewable splits** — 5,039 images (4,318 train +
+721 validation), with E0 `custom_cnn` predictions. The test split was not
+reviewed and cannot be.
+
+| | train | validation |
+| --- | --- | --- |
+| `low_resolution` | 273 — 6.3% | 60 — 8.3% |
+| `blurry` | 96 — 2.2% | 24 — 3.3% |
+| `ambiguous` | 38 — 0.9% | 46 — 6.4% |
+| `suspected_mislabel` | 238 — 5.5% | 220 — **30.5%** |
+
+Both `low_resolution` figures **independently reproduce Phase 4's exhaustive
+measurements exactly** (6.3% / 8.3%).
+
+**The `suspected_mislabel` split difference proves the flag tracks the model, not
+the labels**: 5.5% on train against 30.5% on validation, differing only in that
+the model was fitted on one. Both are essentially the model's error rate on that
+split, which is exactly why the category is a queue and never an action.
+
+**New finding — the quality flags identify *easy* images, not hard ones.** On
+held-out validation, blur-flagged images score 0.708 against 0.604 for the rest,
+and low-resolution images 0.700 against 0.599. The contact sheets explain it:
+many blur-flagged images are perfectly sharp but have a smooth, low-texture
+subject on a plain background — the classic variance-of-Laplacian false positive
+— and that same plain-close-up cohort is easy to classify. Two consequences:
+the blur threshold is not validated and the flag reads closer to "low texture"
+than "out of focus" (risk 29), and **risk 5's question about the sub-160 px
+cohort is answered negatively for rice10** — errors do not concentrate there —
+though the result is confounded and covers one scope.
+
+Contact sheets confirm the taxonomy is needed: the splits visibly contain
+illustration plates, multi-panel composites, watermarks and QR codes,
+symptom-only frames and tiny subjects.
+
+**No curated manifest was created and no review decision was made.** Any curated
+split would go to a new versioned directory under
+`data/processed/<scope>/curated/<version>/`, leaving the official manifests
+byte-identical.
+
+**New — review manifests are protected from casual overwrite.** The manifest is
+the one artifact a human writes into by hand, so the script refuses to replace
+one that carries reviewer decisions, or that holds more rows than the current run
+would write. Both guards come from real incidents in this phase: a `--limit 40`
+pass silently replaced a complete 721-row review, and the same path would have
+destroyed decisions had any been entered.
+
+**Fixed — the train split could not be scored at all at first.** `build_loaders`
+gives the train split training semantics: it shuffles, augments, and drops the
+short final batch, so 30 of 4,318 images went missing and predictions would not
+have lined up with manifest rows. The coverage guard caught it rather than
+letting a misaligned join through; the review now builds every split with
+evaluation semantics.
+
+50 tests were added across `test_review.py` and `test_shipped_configs.py`.
+
 ## Verified invariants
 
 These are enforced by tests and re-checked every phase.
@@ -514,6 +715,33 @@ These are enforced by tests and re-checked every phase.
 - Every completed run records the Git commit it ran from. Both Phase 7 runs
   recorded `5f169fc` with `dirty: false`, so the code that produced each
   checkpoint is recoverable.
+- The F1 denominator `precision + recall` is never clamped. Only a zero
+  denominator falls back to zero; a positive fractional denominator divides
+  as-is. A regression test exercises precision and recall summing to below 1 —
+  the one interval where the old and new implementations disagree — and compares
+  macro, weighted and per-class F1 against scikit-learn there.
+- Corrected metrics are recomputed from each run's recorded per-class precision
+  and recall; the original artifacts are never rewritten, and a run whose best
+  epoch moves under correction is flagged rather than having its `best.pt`
+  silently re-pointed.
+- Smoke-run artifacts are refused by the results reader, so a meaningless number
+  cannot be corrected into a result.
+- Each Phase 7.2 screening config differs from the E0 control in **exactly one**
+  field; a test resolves both and fails if a second variable appears, and each
+  completed run's summary is re-checked to have built only train and validation.
+- A checkpoint is scored through **its own** recorded preprocessing, rebuilt from
+  the run summary, with `strict_preprocessing=True`. Scoring a 224x224 model
+  through a 160x160 pipeline raises rather than producing a plausible wrong
+  figure, and a test pins each run's rebuilt fingerprint to its checkpoint's.
+- The image-quality review opens `ip102_v1.1` read-only. Tests verify that
+  measuring an image and building a contact sheet leave the source file's size
+  and mtime unchanged.
+- The review asserts only the two pixel-measurable categories. Every
+  judgement-based category, including `suspected_mislabel`, is a suggestion, and
+  `reviewer_decision` ships empty; an unrecognised decision is rejected on read.
+- No review path can name the test split, and a curated manifest version
+  containing a path separator is refused, so a curated write cannot escape
+  `data/processed/<scope>/curated/`.
 
 ## Open risks
 
@@ -525,7 +753,7 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 2 | ~~Global `site-packages` polluted~~ **Closed in Phase 3.** venv resolves only its own `site-packages` | done |
 | 3 | VRAM is contended: 4,091 MiB free measured under desktop load versus 7,054 MiB when idle, of 8,188 MiB total. Training and Ollama must not share the GPU | 8, 14 |
 | 4 | ~~Docker GPU passthrough unverified~~ **Closed in Phase 3.** Verified with `nvidia/cuda:12.6.3-base-ubuntu22.04` under both `--gpus all` and `--runtime=nvidia` | done |
-| 5 | Images under 160 px on the short side are upscaled. **Quantified in Phase 4**: rice10 6.3/8.3/9.6%, full102 4.0/5.3/5.8% by split. **Phase 5 fixed the policy** (bilinear, antialiased) and confirmed the cohort still yields correct tensors; whether errors concentrate there is still open | 9 |
+| 5 | Images under 160 px on the short side are upscaled. **Quantified in Phase 4**: rice10 6.3/8.3/9.6%, full102 4.0/5.3/5.8% by split. **Phase 5 fixed the policy** (bilinear, antialiased). **Phase 7.3 measured the consequence on rice10 validation: errors do NOT concentrate there** — that cohort scores 0.700 against 0.599 for normal-resolution images. Confounded, though: low-resolution images here are largely plain close-ups, which are easy for reasons unrelated to size. Open for `full102`, where the task is far harder | 8, 9 |
 | 6 | full102 imbalance is 82x; validation has classes with only 7 images, so macro F1 will be noisy. **Reconfirmed exhaustively in Phase 4** | 8 |
 | 7 | ~~Content-hash duplicates and cross-split leakage unmeasured~~ **Closed in Phase 4.** rice10 has 0 cross-split groups; full102 has 2 (4 files, ~0.009% of test). Recorded, not corrected | done |
 | 8 | Ollama is not installed | 11 |
@@ -533,18 +761,27 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 10 | ~~Ten `.jpg` files are really PNG and seven are RGBA~~ **Closed in Phase 5.** RGB conversion is applied at the decode boundary and again as the first pipeline step; all ten files verified to yield `(3, 160, 160)` under both scopes and pinned by tests | done |
 | 11 | **New in Phase 4**: near-duplicate leakage is still unmeasured. Byte hashing catches only exact copies, not re-encodes of the same photo. Perceptual hashing was not run | 8, 9 |
 | 12 | **New in Phase 5**: aspect ratio is not preserved — evaluation resizes directly to 160x160, distorting images far from 1:1 (source spans 0.24-6.04). The centre-crop alternative is configured but untested | 7 |
-| 13 | **New in Phase 5**: augmentation magnitudes are untuned guesses. Phase 5 fixed the mechanism, not the strength | 7 |
+| 13 | **New in Phase 5, partly addressed in Phase 7.2**: augmentation magnitudes are untuned guesses. E3 tested the RandomResizedCrop floor and moving it 0.6 → 0.8 made results *worse* (−0.0153), so the shipped 0.6 is not obviously too aggressive. Rotation, jitter and flip magnitudes remain untuned | 8 |
 | 14 | **New in Phase 5**: training-run reproducibility is conditional on a fixed `runtime.num_workers`. Changing the worker count changes how per-worker RNG streams interleave, so the exact augmentations drawn differ. Evaluation is unaffected | 7, 8 |
 | 15 | **New in Phase 5**: normalisation uses ImageNet constants as fixed numbers rather than statistics measured on IP102. Changing them requires bumping `dataset.preprocessing_version` | 7 |
 | 16 | **New in Phase 6**: no architecture or hyperparameter has been tuned. Learning rate, batch size, epochs, augmentation strength and the two architectures' widths and depths are all untested defaults. The smoke figures are not evidence of anything | 7, 8 |
 | 17 | ~~`custom_cnn` may not earn its complexity~~ **Closed in Phase 7.** It beats the control by +0.1894 macro F1 on all ten classes, at 2.3x less VRAM and 2.3x faster per epoch | done |
 | 18 | **Partly addressed in Phase 7**: AMP skipped steps are now counted per epoch, logged and summarised; both real runs recorded 0 skips across 4,020 optimiser steps, so the Phase 6 calibration fix holds at full scale. There is still no test that forces an overflow and asserts the schedule holds back | 8 |
-| 19 | **New in Phase 6**: full training reproducibility is untested end to end. Seeds, worker streams and RNG-state resumption are all implemented and unit-tested, but no two full runs have been compared for bit-identical results. Both Phase 7 runs recorded a clean commit, so a rerun is now at least *possible* | 8 |
+| 19 | ~~Full training reproducibility untested end to end~~ **Closed in Phase 7.2.** E0 rebuilt the corrected Phase 7 custom run bit-identically: max per-epoch macro F1 delta 0.00000000 across all 60 epochs, and identical per-class F1, at fixed `num_workers`. Changing the worker count still changes augmentation draws (risk 14) | done |
 | 20 | ~~The runtime estimate's 40% validation ratio is unmeasured~~ **Largely closed in Phase 7.** Peak VRAM predictions came within 0.7% and the per-epoch estimate matched the baseline's real ~11.1 s. Validation is far cheaper than 40% in practice (~0.9 s against ~11 s), so the estimate is conservative | done |
-| 23 | **New in Phase 7**: 60 epochs is undertrained for protocol A. Both arms peaked at epoch 58 of 60 and neither triggered early stopping, so both absolute scores are floors. The comparison is unaffected, but any headline rice10 number quoted from these runs understates what the architecture can reach | 8 |
+| 23 | **New in Phase 7, refined in Phase 7.2**: both Phase 7 arms peaked at or beside the 60-epoch cap, which looked like undertraining. E1 tested it: given 100 epochs and a stretched cosine the model stopped early at 69 having peaked at 54, and did *not* beat E0 on the late-run mean. So the cap was not the binding constraint — the 60-epoch cosine anneals to zero by epoch 60, which is what made both arms look still-climbing | done |
 | 24 | **New in Phase 7**: a 51-minute stall in the baseline's epoch 34 (against an 11.1 s median) corrupts that run's wall-clock and mean-throughput figures. Cause is external — desktop GPU contention or sleep — and the model was unaffected. Long full102 runs are more exposed to this; consider running them with the desktop idle | 8 |
 | 21 | **New in Phase 7**: free VRAM measured from inside a CUDA context (7,014 MiB) disagrees with `nvidia-smi` before the process starts (4,838 MiB), because Windows evicts idle desktop allocations under demand. Planning uses the conservative `nvidia-smi` figure; peak step VRAM of 1,991 MiB fits either way, but a larger batch size must be planned against the lower number | 8 |
 | 22 | **New in Phase 7**: the shared protocol uses the midpoint learning rate 0.0015 for both arms, so neither is at its own optimum. This is deliberate — it is what makes the comparison controlled — but it means the comparison establishes which architecture is better *at a common setting*, not which has the higher achievable ceiling | 7, 8 |
+| 25 | **New in Phase 7.1**: `custom_cnn`'s `best.pt` holds epoch 58, which the defective metric selected; the corrected best is epoch 60. The checkpoint was deliberately not rewritten. Any statement about "the best model" from that run must name the selecting metric, and Phase 9 must not freeze that checkpoint assuming it is the corrected optimum | 8, 9 |
+| 26 | **New in Phase 7.1**: the metric defect survived a passing scikit-learn comparison because no test case exercised precision + recall in (0, 1). Other metrics verified the same way — balanced accuracy, top-5, and anything Phase 9 adds — carry the same exposure unless their tests cover the intervals where implementations can diverge | 8, 9 |
+| 27 | **New in Phase 7.2**: E1 changes both budget and cosine schedule shape, since the schedule is defined over `training.epochs`. The two are inseparable for a cosine, so an E1 gain cannot be attributed to length alone. **Moot in practice** — E1 did not improve on the late-run mean, so there is no gain to attribute | done |
+| 30 | **New in Phase 7.2**: every screening difference is within or close to within-run epoch noise (last-10 range 0.008–0.021 against E2's +0.0138 margin). Single-seed screening can rank arms but cannot establish any of them; the three-seed confirmation is required before E2's advantage is treated as real | 7.2 |
+| 31 | **New in Phase 7.2**: "best epoch" is the maximum of a noisy series and systematically favours the luckiest epoch. E1 ranked second on peak but *last* on late-run mean. Any future selection — including Phase 9's freeze — should look at both readings rather than the peak alone | 8, 9 |
+| 32 | **New in Phase 7.2**: scoring a checkpoint through the ambient configuration rather than its own recorded preprocessing produced a wrong E2 confusion matrix that loaded without error. Fixed and tested for this path, but `strict_preprocessing` still defaults to `False` elsewhere, so any other post-hoc evaluation added later carries the same exposure | 8, 9 |
+| 28 | **New in Phase 7.3**: no human review pass has been completed. The audit built the queue; the real rates of `diagram_text`, `symptom_only`, `tiny_subject`, `unrelated` and genuine mislabelling are all still unknown, and the 30.5% `suspected_mislabel` figure is a model error rate, not a defect count | 8, 9 |
+| 29 | **New in Phase 7.3, confirmed**: the `blurry` flag is a variance-of-Laplacian focus measure at an unvalidated threshold of 100. The false positive is now *demonstrated*, not merely predicted — contact sheets show sharp moth and hopper photographs flagged because the subject is smooth against a plain background, and the flagged cohort scores **better** than average (0.708 vs 0.604 on held-out validation). Read the flag as "low texture", not "out of focus"; its 2.2–3.3% is a queue size, not a blur rate | 8, 9 |
+| 33 | **New in Phase 7.3**: `full102` has not been reviewed at all. At 52,603 reviewable images it is ~10x the rice10 work, so every review finding above describes rice10 only | 8 |
 
 ## Rules in force
 

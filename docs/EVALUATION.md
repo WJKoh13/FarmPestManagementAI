@@ -9,6 +9,33 @@ accuracy, top-1 and top-5 accuracy, weighted F1, per-class precision and recall,
 confusion matrix, calibration, model size, parameter count, CPU and GPU latency,
 peak memory and throughput.
 
+### The F1 definition (corrected in Phase 7.1)
+
+Per-class F1 is `2 * precision * recall / (precision + recall)`, with the
+denominator used **as-is** whenever it is positive. Only an exactly-zero
+denominator falls back to zero, matching `sklearn`'s `zero_division=0`. Macro F1
+averages over every class including ones the model never predicted; weighted F1
+averages by ground-truth support.
+
+Phase 7's implementation clamped that denominator to a minimum of 1, which is
+correct for precision and recall — their denominators are integer counts — but
+wrong for F1, whose denominator is a fraction. Every class with
+`0 < precision + recall < 1` was therefore under-reported. All Phase 7 figures
+were recomputed; see [TRAINING.md](TRAINING.md).
+
+**The lesson for later phases.** That defect coexisted with a passing
+scikit-learn comparison, because no test case exercised the interval where the
+two implementations differ. Any metric added in Phase 9 must be tested across the
+ranges where a plausible implementation error would actually show, not only on
+convenient inputs.
+
+Corrected metrics can be recomputed from completed runs without retraining, since
+per-class precision, recall and support are recorded beside every F1:
+
+```bash
+python scripts/correct_metrics.py --verify-checkpoints
+```
+
 ### Comparing scopes
 
 `rice10` and `full102` are **different classification tasks**. Their macro F1

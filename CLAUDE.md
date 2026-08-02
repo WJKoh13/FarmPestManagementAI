@@ -266,6 +266,40 @@ batches for a runtime estimate, reports free VRAM and exits without training or
 writing a checkpoint. **Run `--plan` and obtain approval before launching a full
 run.**
 
+After Phase 7.1 corrected the macro-F1 formula and added plotting:
+
+```bash
+python scripts/correct_metrics.py --verify-checkpoints
+python scripts/plot_results.py --confusion --in-run-dir
+python scripts/compare_experiments.py
+```
+
+`correct_metrics.py` recomputes corrected macro F1 from each run's recorded
+per-class precision and recall and writes
+`data/reports/phase7_metric_correction.json`. It never modifies a run artifact.
+
+`plot_results.py` renders PNG and SVG figures under the configured plots
+directory. `--confusion` rescores each run's `best.pt` **through that run's own
+recorded preprocessing**, never the ambient configuration — a 224x224 model
+scored through a 160x160 pipeline would otherwise load cleanly and produce a
+wrong matrix. `--in-run-dir` also writes each run's figures beside its
+checkpoints.
+
+`compare_experiments.py` ranks the Phase 7.2 arms on corrected macro F1 and
+marks any difference below 0.01 as indistinguishable from seed noise.
+
+None of these retrains anything or touches the test split.
+
+After Phase 7.3 built the image-quality review:
+
+```bash
+python scripts/review_images.py --split validation --contact-sheets
+```
+
+Read-only. It never renames, moves, deletes, re-encodes or relabels a source
+image, never edits an official manifest, and cannot be pointed at the test
+split. It only ever *suspects*: `reviewer_decision` is a human's to fill in.
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

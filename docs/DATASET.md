@@ -288,9 +288,165 @@ Both scopes have all classes present in all three splits, no filename appears in
 more than one split, and every derived record traces back to the source manifest
 in order.
 
+## Image-quality review policy (Phase 7.3)
+
+A read-only audit that **proposes and never decides**. It measures objective
+image properties, records what a trained checkpoint predicted, and writes a
+review manifest for a human to complete:
+
+```bash
+python scripts/review_images.py --split validation --contact-sheets
+python scripts/review_images.py --split validation \
+    --checkpoint artifacts/checkpoints/rice10_custom_protocolA/best.pt
+```
+
+**Hard rules.** `ip102_v1.1` is opened read-only: no source image is renamed,
+moved, deleted, re-encoded or relabelled, and two tests verify that measuring an
+image and building a contact sheet leave it byte-identical. Official derived
+manifests are never edited. **The test split cannot be reviewed** — `--split`
+does not offer it, and the reviewable splits are checked again inside the script,
+because reviewing the test set would let its contents shape a data decision.
+
+**The LLM never deletes or relabels an image.** The audit's most confident output
+is the word *suspected*.
+
+### Categories
+
+| Category | Meaning |
+| --- | --- |
+| `valid_close_up` | Keep. Clear, well-framed subject |
+| `difficult_but_valid` | Keep. Correctly labelled but genuinely hard |
+| `blurry` | Out of focus or motion-blurred |
+| `low_resolution` | Short side below the model input; upscaled by preprocessing |
+| `tiny_subject` | Pest present but occupies a very small part of the frame |
+| `symptom_only` | Crop damage visible, no identifiable insect |
+| `diagram_text` | Illustration, plate or text rather than a photograph |
+| `unrelated` | Not a pest image at all |
+| `ambiguous` | Cannot be assigned confidently from the image alone |
+| `suspected_mislabel` | Appears to show a different class than its label |
+
+**Only `blurry` and `low_resolution` are asserted automatically**, because only
+those are measurable from pixels — a short side below the input size, and a
+variance-of-Laplacian focus measure below threshold. Every other category needs
+human judgement and is at most *suggested* in the `suspected_issue` column.
+
+The distinction is deliberate. A low-confidence prediction is evidence about the
+**model**, not proof about the **label**: a blurry photograph of the right pest
+is still labelled correctly, and a model can be confidently wrong on a perfectly
+good image. So a confident model/label disagreement is queued as
+`suspected_mislabel` because it deserves a person's attention, never because it
+establishes anything.
+
+### Manifest and review workflow
+
+The manifest carries filename, split, current label and class name, dimensions,
+short side, aspect ratio, model prediction and confidence, whether the prediction
+matched, measured quality flags, the suspected issue, and two columns —
+`reviewer_decision` and `reviewer_notes` — that are **written empty by design**.
+Reading a completed manifest back rejects any `reviewer_decision` outside the ten
+categories, so a typo cannot propagate downstream.
+
+Contact sheets are grouped by suspected issue, 42 thumbnails per sheet, because
+no one reviews thousands of spreadsheet rows but anyone can scan a page of
+images.
+
+### First pass over rice10 (both reviewable splits)
+
+5,039 images — the complete train and validation splits — at thresholds short
+side < 160 px and focus < 100, with predictions from the E0 `custom_cnn`
+`best.pt`. The test split was not reviewed and cannot be.
+
+| Measurement | train (4,318) | validation (721) |
+| --- | --- | --- |
+| `low_resolution` (measured) | 273 — 6.3% | 60 — 8.3% |
+| `blurry` (measured) | 96 — 2.2% | 24 — 3.3% |
+| `ambiguous` (queued) | 38 — 0.9% | 46 — 6.4% |
+| `suspected_mislabel` (queued) | 238 — 5.5% | 220 — 30.5% |
+
+Both `low_resolution` figures **independently reproduce** the Phase 4 exhaustive
+measurements exactly — 6.3% for train and 8.3% for validation — which is a useful
+check that the audit measures what it claims to.
+
+**The `suspected_mislabel` split difference proves the flag tracks the model, not
+the labels.** It is 5.5% on train and 30.5% on validation, and the only thing
+that differs is that the model was fitted on one and not the other. Both numbers
+are essentially the model's error rate on that split. Reading the validation
+figure as a defect count would propose discarding a third of the split on the
+say-so of a model that is itself only ~61% accurate.
+
+#### The quality flags do not identify hard images
+
+Held-out validation accuracy, split by flag:
+
+| Cohort | Images | Accuracy | Mean confidence |
+| --- | --- | --- | --- |
+| flagged `blurry` | 24 | **0.708** | 0.767 |
+| not flagged | 697 | 0.604 | 0.710 |
+| flagged `low_resolution` | 60 | **0.700** | 0.774 |
+| normal resolution | 661 | 0.599 | 0.706 |
+
+Both flagged cohorts are *easier* for the model, not harder. On the train split
+the blur cohort is fit to 0.990 against 0.930 for everything else — the opposite
+of what a genuine blur flag would produce.
+
+The contact sheets explain why. Many blur-flagged images are **perfectly sharp**
+(`02073.jpg`, `02702.jpg`, `03888.jpg`, `04401.jpg`): what they share is a
+smooth, low-texture subject on a plain background, which is exactly the false
+positive a variance-of-Laplacian focus measure produces. The same plain-close-up
+cohort is also easy to classify, which confounds both flags.
+
+Two consequences, both recorded rather than acted on:
+
+- **The `blurry` threshold of 100 is not validated** and the flag is better read
+  as "low texture" than "out of focus" (risk 29).
+- **Risk 5 asked whether errors concentrate in the sub-160 px upscale cohort. On
+  rice10 validation they do not** — that cohort scores *above* average. This is
+  one scope on one model and is confounded as described, so it narrows the risk
+  rather than closing it; `full102`, where 4.0–5.8% fall below 160 px across a
+  much harder task, is the real test.
+
+Scanning the contact sheets also confirms the taxonomy is needed: the splits
+visibly contain botanical **illustration plates**, **multi-panel composites**
+tiling several photographs into one file, **watermarks and QR codes**,
+**symptom-only** frames showing damaged leaves with no insect, and **tiny
+subjects** in wide field shots.
+
+Artifacts: `data/reports/image_review_rice10_{train,validation}.csv` and 28
+contact sheets under `data/reports/contact_sheets/<split>/`.
+
+#### Review manifests are not overwritten casually
+
+The manifest is the one artifact a human writes into by hand, so
+`review_images.py` refuses to replace an existing one that either carries
+reviewer decisions or holds more rows than the current run would write. Both
+guards come from real incidents: a `--limit 40` pass silently replaced a complete
+721-row review during Phase 7.3, and the same path would have destroyed reviewer
+decisions had any been entered. `--force` overrides deliberately.
+
+### Curated manifests
+
+If a completed human review ever justifies a curated split, it goes to a **new
+versioned directory**, `data/processed/<scope>/curated/<version>/`. The official
+derived manifests stay byte-identical, so the benchmark remains reproducible and
+any curated experiment must state which version it used. `curated_manifest_dir`
+rejects a version containing a path separator, so a curated write cannot escape
+its directory.
+
+**No curated manifest has been created.** No review decision has been made.
+
 ## Still not measured
 
 - **Near-duplicate** detection by perceptual hashing. Byte-level hashing catches
   only exact copies, so visually redundant images remain possible.
-- Whether classification errors concentrate in the sub-160px upscale cohort.
-  Recorded now; analysed in Phase 9.
+- Whether classification errors concentrate in the sub-160px upscale cohort **on
+  `full102`**. Measured for `rice10` in Phase 7.3 and the answer was no — that
+  cohort scores above average — but the result is confounded by the
+  plain-close-up effect described above and covers only one scope.
+- Every judgement-based review category. The Phase 7.3 audit built the queue and
+  the contact sheets over both reviewable splits; **no human review pass has been
+  completed**, so the true rates of `diagram_text`, `symptom_only`,
+  `tiny_subject`, `unrelated` and real mislabelling are all still unknown.
+- A validated blur threshold. The current focus measure demonstrably flags sharp
+  low-texture images, so its 2.2–3.3% is a queue size, not a blur rate.
+- The `full102` review. Phase 7.3 covered `rice10` only; at 52,603 reviewable
+  images `full102` is roughly ten times the work and was not attempted.

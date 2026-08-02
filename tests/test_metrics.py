@@ -226,6 +226,168 @@ def test_accumulator_disables_top5_for_small_scopes() -> None:
     assert MetricsAccumulator(10).track_top5 is True
 
 
+# -- the Phase 7.1 F1 denominator correction ----------------------------
+#
+# The shared safe-division helper used to clamp its denominator to `min=1`.
+# For precision and recall that is a no-op, because their denominators are
+# integer counts. F1's denominator is `precision + recall`, a fraction, and
+# clamping rewrote every value in (0, 1) as 1 — under-reporting F1 for exactly
+# the weakest classes and dragging the macro average down with them.
+#
+# The cases above never caught it: each produces classes whose precision and
+# recall sum to 0 or to at least 1, so the clamp never engaged. These tests
+# target the gap directly.
+
+
+def _weak_class_case() -> tuple[list[int], list[int], int]:
+    """A case whose class 0 has precision + recall strictly between 0 and 1.
+
+    Class 0: 10 true, predicted 20 times, 2 correct.
+        precision 2/20 = 0.10, recall 2/10 = 0.20, sum 0.30 < 1.
+        Correct F1 = 2*0.1*0.2 / 0.3 = 0.1333...
+        Under the clamp the denominator became 1.0, giving 0.04 — a 3.3x
+        under-report of the class the metric most needs to see.
+    """
+    targets = [0] * 10 + [1] * 40
+    predictions = [0] * 2 + [1] * 8 + [0] * 18 + [1] * 22
+    return targets, predictions, 2
+
+
+def test_f1_denominator_below_one_is_not_clamped() -> None:
+    """The regression itself, checked against the closed-form value."""
+    targets, predictions, num_classes = _weak_class_case()
+    metrics = metrics_from_predictions(predictions, targets, num_classes)
+
+    precision, recall = metrics.per_class_precision[0], metrics.per_class_recall[0]
+    assert precision == pytest.approx(0.10)
+    assert recall == pytest.approx(0.20)
+    # The condition that triggered the bug.
+    assert 0.0 < precision + recall < 1.0
+
+    expected = 2 * precision * recall / (precision + recall)
+    assert expected == pytest.approx(0.13333333333333333)
+    assert metrics.per_class_f1[0] == pytest.approx(expected)
+    # The clamped value, pinned so a reintroduction cannot pass silently.
+    assert metrics.per_class_f1[0] != pytest.approx(2 * precision * recall)
+
+
+@pytest.mark.parametrize("average", ["macro", "weighted", None])
+def test_weak_class_f1_matches_sklearn(average: str | None) -> None:
+    """scikit-learn agreement on the case the original suite did not cover."""
+    targets, predictions, num_classes = _weak_class_case()
+    ours = metrics_from_predictions(predictions, targets, num_classes)
+    theirs = sklearn_metrics.f1_score(
+        targets,
+        predictions,
+        average=average,
+        labels=list(range(num_classes)),
+        zero_division=0,
+    )
+    if average == "macro":
+        assert ours.macro_f1 == pytest.approx(theirs)
+    elif average == "weighted":
+        assert ours.weighted_f1 == pytest.approx(theirs)
+    else:
+        assert list(ours.per_class_f1) == pytest.approx(list(theirs))
+
+
+# Reproduced from the real Phase 7 `custom_cnn` run, epoch 1 validation
+# (artifacts/checkpoints/rice10_custom_protocolA/metrics.jsonl, first line).
+# The epoch-1 model predicted almost everything as class 0, so class 0 had
+# precision 0.1801 and recall 0.6847 — summing to 0.865, just under 1, which is
+# precisely where the clamp did its damage. The run recorded F1 0.2466 for that
+# class; the correct value is 0.2853.
+#
+# Supports come straight from the manifest. The true-positive and prediction
+# counts are recovered from the recorded precision and recall, which pin them
+# uniquely: class 0 is 76/422, class 2 is 39/286, class 8 is 2/9.
+#
+# Those three account for 717 of the split's 721 predictions. The remaining 4
+# went to classes 5 and 6, which the run listed as *predicted* — its
+# `classes_never_predicted` was [1, 3, 4, 7, 9] — but which scored no true
+# positives, so their precision recorded as 0.0 and their exact counts are not
+# recoverable. Splitting the remainder between them is the one free choice here,
+# and it changes nothing that is being tested: a class with no true positives
+# has F1 zero however many times it was guessed.
+PHASE7_EPOCH1_SUPPORT = [111, 48, 106, 50, 51, 83, 90, 56, 86, 40]
+PHASE7_EPOCH1_CORRECT = [76, 0, 39, 0, 0, 0, 0, 0, 2, 0]
+PHASE7_EPOCH1_PREDICTED = [422, 0, 286, 0, 0, 2, 2, 0, 9, 0]
+
+
+def _phase7_epoch1_predictions() -> tuple[list[int], list[int]]:
+    """Rebuild a label sequence reproducing that epoch's confusion pattern.
+
+    Only the per-class true-positive, support and predicted-count totals
+    determine precision, recall and F1, so the off-diagonal mass is laid out by
+    filling a confusion matrix row by row: each true class keeps its recorded
+    true positives and spends the rest of its support on whichever predicted
+    class still has budget left.
+    """
+    predicted_classes = [
+        label for label, count in enumerate(PHASE7_EPOCH1_PREDICTED) if count
+    ]
+    budget = {
+        label: PHASE7_EPOCH1_PREDICTED[label] - PHASE7_EPOCH1_CORRECT[label]
+        for label in predicted_classes
+    }
+
+    targets: list[int] = []
+    predictions: list[int] = []
+    for label, support in enumerate(PHASE7_EPOCH1_SUPPORT):
+        correct = PHASE7_EPOCH1_CORRECT[label]
+        targets.extend([label] * support)
+        predictions.extend([label] * correct)
+
+        remaining = support - correct
+        for spender in predicted_classes:
+            if spender == label or remaining == 0:
+                continue
+            take = min(remaining, budget[spender])
+            budget[spender] -= take
+            remaining -= take
+            predictions.extend([spender] * take)
+        assert remaining == 0, f"could not place {remaining} predictions for {label}"
+
+    assert sum(budget.values()) == 0, "prediction counts must be fully consumed"
+    return targets, predictions
+
+
+def test_phase7_run_confusion_pattern_is_reproduced() -> None:
+    """The rebuilt sequence must reproduce the recorded run exactly."""
+    targets, predictions = _phase7_epoch1_predictions()
+    metrics = metrics_from_predictions(predictions, targets, 10)
+
+    assert metrics.samples == 721
+    assert list(metrics.per_class_support) == PHASE7_EPOCH1_SUPPORT
+    # Exactly what the run recorded for this epoch.
+    assert metrics.classes_never_predicted == (1, 3, 4, 7, 9)
+    # Precision and recall were recorded correctly by the buggy run: the clamp
+    # never touched their integer-count denominators.
+    assert metrics.per_class_precision[0] == pytest.approx(0.18009478672985782)
+    assert metrics.per_class_recall[0] == pytest.approx(0.6846846846846847)
+    assert metrics.accuracy == pytest.approx(0.1622746185852982)
+
+
+def test_phase7_run_f1_was_under_reported() -> None:
+    """The corrected F1 for the recorded epoch, and the value it replaces."""
+    targets, predictions = _phase7_epoch1_predictions()
+    metrics = metrics_from_predictions(predictions, targets, 10)
+
+    # What the run recorded for class 0 against what it should have been.
+    assert metrics.per_class_f1[0] == pytest.approx(0.2851782363977486)
+    assert metrics.per_class_f1[0] != pytest.approx(0.24661628453097648)
+
+    # The macro average moves with it, in the direction the bug guaranteed:
+    # clamping an under-1 denominator can only shrink F1, never grow it.
+    assert metrics.macro_f1 == pytest.approx(0.052626309139237805)
+    assert metrics.macro_f1 > 0.03572952550168798
+
+    theirs = sklearn_metrics.f1_score(
+        targets, predictions, average="macro", labels=list(range(10)), zero_division=0
+    )
+    assert metrics.macro_f1 == pytest.approx(theirs)
+
+
 def test_accumulator_reports_top5_for_large_scopes() -> None:
     accumulator = MetricsAccumulator(102)
     accumulator.update(_one_hot_logits([3, 4], 102), torch.tensor([3, 4]))

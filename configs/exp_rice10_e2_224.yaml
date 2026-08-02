@@ -1,0 +1,31 @@
+# Phase 7.2 experiment E2: a larger input, one variable changed.
+#
+# Phase 4 measured 28.9% of full102 training images with a short side below
+# 224 px, against 4.0% below 160 px, so a 224 input upscales far more of the
+# data than a 160 input does. Against that, many pests occupy a small part of
+# the frame, where 160x160 may simply not resolve the discriminative detail.
+# This experiment settles which effect dominates on rice10.
+#
+# THE ONE VARIABLE: dataset.image_size 160x160 -> 224x224.
+#
+# The 60-epoch E0 protocol is kept exactly, so E2 is comparable to E0 rather
+# than to E1. Batch size is deliberately NOT lowered: 224x224 is ~1.96x the
+# pixels of 160x160, and the E0 custom arm peaked at 858 MiB, so a proportional
+# estimate lands near ~1.7 GiB — still inside the conservative ~4.8 GiB free
+# figure from risk 21. `--plan` measures the real number before anything runs;
+# if it does not fit, the batch size must change and E2 stops being a
+# one-variable experiment, which is a result worth recording rather than
+# papering over.
+#
+# NOTE — this changes the preprocessing fingerprint, so an E2 checkpoint will
+# not load under the E0 preprocessing and vice versa. That is the guard working
+# as intended, not a problem to route around.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_rice10_e2_224.yaml --plan
+
+extends: exp_rice10_protocol_a.yaml
+
+dataset:
+  image_size: [224, 224]

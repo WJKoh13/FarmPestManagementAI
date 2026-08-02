@@ -24,6 +24,9 @@ STANDALONE = [
     "model_custom.yaml",
     "smoke_test.yaml",
     "exp_rice10_protocol_a.yaml",
+    "exp_rice10_e1_epochs100.yaml",
+    "exp_rice10_e2_224.yaml",
+    "exp_rice10_e3_crop08.yaml",
     "app.yaml",
     "llm.yaml",
 ]
@@ -202,6 +205,76 @@ def test_the_rice10_comparison_holds_the_protocol_identical(configs_dir: Path) -
     assert model_config_from_config(baseline).name == "baseline_cnn"
     assert model_config_from_config(custom).name == "custom_cnn"
     assert baseline.num_classes == custom.num_classes == 10
+
+
+#: The Phase 7.2 screening experiments, each with the single field it is
+#: allowed to change relative to the E0 control. A one-variable-at-a-time
+#: experiment whose config drifts to two variables produces a number that
+#: cannot be attributed to anything, so the constraint is pinned here.
+PHASE72_EXPERIMENTS = {
+    "exp_rice10_e1_epochs100.yaml": "training.epochs",
+    "exp_rice10_e2_224.yaml": "dataset.image_size",
+    "exp_rice10_e3_crop08.yaml": "preprocessing.augmentation.scale",
+}
+
+
+def _flatten(payload: dict[str, object], prefix: str = "") -> dict[str, object]:
+    """Flatten a nested config mapping to dotted keys."""
+    flat: dict[str, object] = {}
+    for key, value in payload.items():
+        dotted = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(_flatten(value, dotted))
+        else:
+            flat[dotted] = value
+    return flat
+
+
+@pytest.mark.parametrize(
+    ("experiment", "expected_key"), sorted(PHASE72_EXPERIMENTS.items())
+)
+def test_phase72_experiments_change_exactly_one_variable(
+    configs_dir: Path, experiment: str, expected_key: str
+) -> None:
+    """Each screening experiment differs from the E0 control in one field only."""
+    control = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_rice10_protocol_a.yaml"),
+        ]
+    )
+    variant = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, experiment),
+        ]
+    )
+
+    control_flat = _flatten(control.to_dict())
+    variant_flat = _flatten(variant.to_dict())
+    differences = {
+        key
+        for key in set(control_flat) | set(variant_flat)
+        if control_flat.get(key) != variant_flat.get(key)
+        # The provenance list naturally names a different file.
+        and "config_sources" not in key
+    }
+
+    assert differences == {expected_key}, (
+        f"{experiment} changes {sorted(differences)}, not just {expected_key!r}"
+    )
+    # The scope, and therefore the class count, is never a screening variable.
+    assert variant.num_classes == control.num_classes == 10
+
+
+def test_phase72_experiments_never_touch_the_test_split(configs_dir: Path) -> None:
+    """No screening config may name the test split in any form."""
+    for experiment in PHASE72_EXPERIMENTS:
+        text = config_path(configs_dir, experiment).read_text(encoding="utf-8")
+        body = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("#")
+        )
+        assert "test" not in body, f"{experiment} references the test split"
 
 
 def test_the_shipped_baseline_is_not_the_model_config_default(configs_dir: Path) -> None:
