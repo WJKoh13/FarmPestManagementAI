@@ -287,9 +287,80 @@ and not the other reintroduces exactly the confound this file exists to remove.
 
 ## Results
 
-_No real experiment has been run. Phase 6 established the pipeline; Phases 7-9
-produce the results. The smoke figures below are from capped runs and are
-**meaningless as measurements** — they exist only to prove the machinery works._
+### Experiment 1 — rice10 architecture comparison (Phase 7, complete)
+
+Both arms ran the full 4,318 train / 721 validation splits under
+`exp_rice10_protocol_a.yaml`, seed 1337, preprocessing fingerprint
+`9e75177ab60f96e0`, from clean commit `5f169fc`. The test split was never built.
+**All figures below are validation figures.**
+
+| | `baseline_cnn` | `custom_cnn` |
+| --- | --- | --- |
+| Parameters | 1,148,874 | 1,435,242 |
+| **Validation macro F1** | 0.3837 | **0.5731** |
+| Validation accuracy | 0.4771 | **0.6075** |
+| Weighted F1 | 0.4147 | **0.5911** |
+| Balanced accuracy | 0.4354 | **0.5930** |
+| Top-5 accuracy | 0.8682 | **0.8849** |
+| Validation loss | 1.7427 | **1.5937** |
+| Best epoch | 58 | 58 |
+| AMP skipped steps | 0 | 0 |
+| Optimiser steps | 4,020 | 4,020 |
+| Peak VRAM | 1,995 MiB | **858 MiB** |
+| Median epoch | 11.1 s | **4.9 s** |
+
+**`custom_cnn` wins by +0.1894 macro F1, a 1.49x improvement**, and it wins on
+**every one of the ten classes** — there is no class where the control is
+better, so this is not a trade-off between common and rare pests:
+
+| Class | Support | `baseline_cnn` | `custom_cnn` | Δ |
+| --- | --- | --- | --- | --- |
+| rice leaf roller | 111 | 0.652 | 0.793 | +0.141 |
+| rice leaf caterpillar | 48 | 0.068 | 0.307 | +0.239 |
+| asiatic rice borer | 106 | 0.432 | 0.636 | +0.204 |
+| yellow rice borer | 50 | 0.506 | 0.583 | +0.077 |
+| rice gall midge | 51 | 0.558 | 0.720 | +0.162 |
+| brown plant hopper | 83 | 0.286 | 0.344 | +0.058 |
+| white backed plant hopper | 90 | 0.332 | 0.500 | +0.168 |
+| small brown plant hopper | 56 | 0.152 | 0.464 | +0.312 |
+| rice water weevil | 86 | 0.600 | 0.766 | +0.166 |
+| rice leafhopper | 40 | 0.251 | 0.619 | +0.368 |
+
+Neither model left a class unpredicted. The largest gains are on the classes the
+control handled worst — rice leafhopper (+0.368), small brown plant hopper
+(+0.312) and rice leaf caterpillar (+0.239) — which is why the macro average
+moves further than accuracy does.
+
+**Risk 17 is resolved: the extra architectural complexity earns its place.**
+`custom_cnn` is better on every class, uses 2.3x less peak VRAM and trains 2.3x
+faster per epoch, at 1.25x the parameters. Squeeze-and-excitation, residual
+connections and stochastic depth are carrying real weight here, not decoration.
+
+**Neither arm early-stopped, and both were still improving at the cap.** Best
+macro F1 landed at epoch 58 of 60 for both, with patience 15 never approached.
+The cosine schedule drove the learning rate to zero while both models were still
+gaining, so **60 epochs is undertrained for this protocol**. The comparison
+remains valid — both arms were cut off at the same point under the same schedule
+— but the absolute numbers are floors, not ceilings. Extending the budget is a
+protocol change that must apply to both arms equally.
+
+**A 51-minute stall in the baseline run is not a training cost.** Epoch 34 took
+3,070 s against a median of 11.1 s; every other epoch was normal, AMP skipped
+zero steps, VRAM stayed flat and the loss fell smoothly across it. The signature
+is desktop GPU contention or a sleep, not a code fault. Real training time was
+~12 min against the 11.4 min plan estimate. **The 63.8 min wall clock and the
+371 img/s mean throughput are both distorted by this single epoch and must not be
+quoted as benchmarks**; the honest baseline figures are ~11.1 s/epoch and the
+plan-measured 404 img/s. The custom run has no such outlier: 6.3 min wall clock,
+median 4.9 s/epoch.
+
+The plan estimates were otherwise accurate. Predicted peak VRAM 1,991 / 852 MiB
+against measured 1,995 / 858 MiB, within 0.7%.
+
+### Smoke figures (Phase 6, not results)
+
+_The figures below are from capped runs and are **meaningless as
+measurements** — they exist only to prove the machinery works._
 
 | Scope | Model | Overfit check (8 images, 100 steps) | One capped epoch |
 | --- | --- | --- | --- |

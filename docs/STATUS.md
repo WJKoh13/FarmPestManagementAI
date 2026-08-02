@@ -4,9 +4,9 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 6 — Custom CNN and smoke training** |
-| Phase 7 state | **Prepared, awaiting approval to launch the two runs** |
-| Next phase | Phase 7 — rice10 development experiments |
+| Current phase completed | **Phase 7 — rice10 development experiments** |
+| Next phase | Phase 8 — full102 experiment and scope selection |
+| Phase 7 result | `custom_cnn` **0.5731** vs `baseline_cnn` 0.3837 validation macro F1 |
 | Branch | `zy_CNN` |
 | Active default scope | `rice10` (switchable to `full102`) |
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
@@ -296,11 +296,57 @@ read as a result.
 173 tests were added across five files, 11 of which read the real dataset. The
 suite is 601 passing, with `ruff` and `mypy` clean.
 
-### Phase 7 — rice10 development experiments (prepared, not yet run)
+### Phase 7 — rice10 development experiments (complete)
 
-Built the real experiment entry point and the controlled comparison it will run.
-**No training run has been launched**: both arms are planned, measured and
-awaiting approval. No test split was built or read.
+Built the real experiment entry point, then ran the controlled comparison it was
+built for. Both arms completed from clean commit `5f169fc`. No test split was
+built or read, and the source dataset is unchanged (2020 timestamps intact).
+
+**Result: `custom_cnn` beats `baseline_cnn` by +0.1894 validation macro F1
+(0.5731 vs 0.3837, a 1.49x improvement), winning on all ten classes.**
+
+| | `baseline_cnn` | `custom_cnn` |
+| --- | --- | --- |
+| Parameters | 1,148,874 | 1,435,242 |
+| **Validation macro F1** | 0.3837 | **0.5731** |
+| Validation accuracy | 0.4771 | **0.6075** |
+| Balanced accuracy | 0.4354 | **0.5930** |
+| Top-5 accuracy | 0.8682 | **0.8849** |
+| Best epoch | 58 / 60 | 58 / 60 |
+| AMP skipped steps | 0 | 0 |
+| Peak VRAM | 1,995 MiB | **858 MiB** |
+| Median epoch | 11.1 s | **4.9 s** |
+
+Per-class F1 is in [TRAINING.md](TRAINING.md). The largest gains are on the
+classes the control handled worst — rice leafhopper +0.368, small brown plant
+hopper +0.312, rice leaf caterpillar +0.239 — which is why the macro average
+moves further than accuracy. Neither model left a class unpredicted.
+
+**Risk 17 is resolved.** The custom architecture earns its complexity: better on
+every class, 2.3x less peak VRAM, 2.3x faster per epoch, at 1.25x the
+parameters.
+
+**New finding — 60 epochs is undertrained for this protocol.** Both arms scored
+their best at epoch 58 of 60 and neither approached patience 15, so the cosine
+schedule drove the learning rate to zero while both were still improving. The
+comparison is still valid — both were cut off identically — but the absolute
+numbers are floors rather than ceilings. Extending the budget is a protocol
+change that must apply to both arms equally, so it was not done unilaterally.
+
+**New finding — a 51-minute stall that was not a training cost.** The baseline's
+epoch 34 took 3,070 s against a median of 11.1 s. Every other epoch was normal,
+AMP skipped zero steps, VRAM stayed flat and the loss fell smoothly across it,
+so this was desktop GPU contention or a sleep rather than a code fault. It
+matters only because it corrupts two derived figures: the 63.8 min wall clock
+and the 371 img/s mean throughput both include it and **must not be quoted as
+benchmarks**. Real baseline training was ~12 min at ~11.1 s/epoch, against the
+11.4 min plan estimate. The custom run has no such outlier (6.3 min, median
+4.9 s/epoch).
+
+**The plan estimates held.** Predicted peak VRAM 1,991 / 852 MiB against measured
+1,995 / 858 MiB — within 0.7% for both arms.
+
+#### What was built before the runs
 
 **`scripts/train.py` is the entry point for every real experiment.**
 `smoke_train.py` is explicitly not an alternative, and the new script refuses to
@@ -465,6 +511,9 @@ These are enforced by tests and re-checked every phase.
   uninterpretable result.
 - Each architecture's reported shape and parameter count come from its shipped
   configuration file, never from `ModelConfig` field defaults.
+- Every completed run records the Git commit it ran from. Both Phase 7 runs
+  recorded `5f169fc` with `dirty: false`, so the code that produced each
+  checkpoint is recoverable.
 
 ## Open risks
 
@@ -488,10 +537,12 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 14 | **New in Phase 5**: training-run reproducibility is conditional on a fixed `runtime.num_workers`. Changing the worker count changes how per-worker RNG streams interleave, so the exact augmentations drawn differ. Evaluation is unaffected | 7, 8 |
 | 15 | **New in Phase 5**: normalisation uses ImageNet constants as fixed numbers rather than statistics measured on IP102. Changing them requires bumping `dataset.preprocessing_version` | 7 |
 | 16 | **New in Phase 6**: no architecture or hyperparameter has been tuned. Learning rate, batch size, epochs, augmentation strength and the two architectures' widths and depths are all untested defaults. The smoke figures are not evidence of anything | 7, 8 |
-| 17 | **Restated in Phase 7**: `custom_cnn` has 1.25x *more* parameters than the shipped `baseline_cnn`, not 2.3x fewer — the Phase 6 figure was measured against `ModelConfig` defaults. Neither has been compared on a real run. The control may yet win, in which case the extra complexity is not earning its place | 7 |
-| 18 | **Partly addressed in Phase 7**: AMP skipped steps are now counted per epoch, logged and summarised, so a regression in torch's scaler behaviour is visible in the metrics. There is still no test that forces an overflow and asserts the schedule holds back | 7, 8 |
-| 19 | **New in Phase 6**: full training reproducibility is untested end to end. Seeds, worker streams and RNG-state resumption are all implemented and unit-tested, but no two full runs have been compared for bit-identical results | 7 |
-| 20 | **New in Phase 7**: the runtime estimate models the validation pass as 40% of a training step per batch. That ratio is assumed, not measured; the first real run will show how close it is | 7 |
+| 17 | ~~`custom_cnn` may not earn its complexity~~ **Closed in Phase 7.** It beats the control by +0.1894 macro F1 on all ten classes, at 2.3x less VRAM and 2.3x faster per epoch | done |
+| 18 | **Partly addressed in Phase 7**: AMP skipped steps are now counted per epoch, logged and summarised; both real runs recorded 0 skips across 4,020 optimiser steps, so the Phase 6 calibration fix holds at full scale. There is still no test that forces an overflow and asserts the schedule holds back | 8 |
+| 19 | **New in Phase 6**: full training reproducibility is untested end to end. Seeds, worker streams and RNG-state resumption are all implemented and unit-tested, but no two full runs have been compared for bit-identical results. Both Phase 7 runs recorded a clean commit, so a rerun is now at least *possible* | 8 |
+| 20 | ~~The runtime estimate's 40% validation ratio is unmeasured~~ **Largely closed in Phase 7.** Peak VRAM predictions came within 0.7% and the per-epoch estimate matched the baseline's real ~11.1 s. Validation is far cheaper than 40% in practice (~0.9 s against ~11 s), so the estimate is conservative | done |
+| 23 | **New in Phase 7**: 60 epochs is undertrained for protocol A. Both arms peaked at epoch 58 of 60 and neither triggered early stopping, so both absolute scores are floors. The comparison is unaffected, but any headline rice10 number quoted from these runs understates what the architecture can reach | 8 |
+| 24 | **New in Phase 7**: a 51-minute stall in the baseline's epoch 34 (against an 11.1 s median) corrupts that run's wall-clock and mean-throughput figures. Cause is external — desktop GPU contention or sleep — and the model was unaffected. Long full102 runs are more exposed to this; consider running them with the desktop idle | 8 |
 | 21 | **New in Phase 7**: free VRAM measured from inside a CUDA context (7,014 MiB) disagrees with `nvidia-smi` before the process starts (4,838 MiB), because Windows evicts idle desktop allocations under demand. Planning uses the conservative `nvidia-smi` figure; peak step VRAM of 1,991 MiB fits either way, but a larger batch size must be planned against the lower number | 8 |
 | 22 | **New in Phase 7**: the shared protocol uses the midpoint learning rate 0.0015 for both arms, so neither is at its own optimum. This is deliberate — it is what makes the comparison controlled — but it means the comparison establishes which architecture is better *at a common setting*, not which has the higher achievable ceiling | 7, 8 |
 
