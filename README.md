@@ -185,6 +185,28 @@ confusion_matrix.png  counts, shaded by row fraction
 per_class_f1.png      sorted worst-first
 ```
 
+## Using the selected CNN in the Streamlit app
+
+After training, choose the run with the strongest **macro F1**. Do not rename or move individual
+files: keep the complete artifact pair in this location:
+
+```text
+runs/<model_name>/<run_id>/
+  best_model.pt
+  results.json
+```
+
+The app reads every `results.json`, selects the run with the highest `macro_f1`,
+then loads its neighbouring `best_model.pt` automatically when it starts.
+`save_run(...)` already produces this layout. For the completed in-repository
+model, train and save it with `model_name="alexnet"`; the app can then load it
+without any configuration change.
+
+If the selected model uses a new architecture, keep its Python architecture
+definition in `ip102_bench/models/`, register it in `SCRATCH_REGISTRY`, and use
+the same `model_name` in `save_run`. This is required because a PyTorch state
+dictionary contains weights, not the model's layer definitions.
+
 For the error analysis, filter `predictions.csv` on `correct == 0` and sort by
 confidence descending. The confident mistakes are where the model learned
 something wrong; the low-confidence ones are just hard images.
