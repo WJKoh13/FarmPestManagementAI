@@ -1,0 +1,63 @@
+{
+  "subset": "detection_top10",
+  "source": "detection",
+  "description": "Top ten classes of the IP102 detection subset, with bounding boxes. Cropping to the box removes most of the web-scrape noise (lifecycle diagrams, crop-damage-only photos) that makes the classification subset hard to learn from.",
+  "num_classes": 10,
+  "classes": [
+    {
+      "project_label": 0,
+      "original_label": 14,
+      "class_name": "grub"
+    },
+    {
+      "project_label": 1,
+      "original_label": 15,
+      "class_name": "mole_cricket"
+    },
+    {
+      "project_label": 2,
+      "original_label": 16,
+      "class_name": "wireworm"
+    },
+    {
+      "project_label": 3,
+      "original_label": 22,
+      "class_name": "corn_borer"
+    },
+    {
+      "project_label": 4,
+      "original_label": 24,
+      "class_name": "aphids"
+    },
+    {
+      "project_label": 5,
+      "original_label": 48,
+      "class_name": "locustoidea"
+    },
+    {
+      "project_label": 6,
+      "original_label": 50,
+      "class_name": "legume_blister_beetle"
+    },
+    {
+      "project_label": 7,
+      "original_label": 51,
+      "class_name": "blister_beetle"
+    },
+    {
+      "project_label": 8,
+      "original_label": 70,
+      "class_name": "miridae"
+    },
+    {
+      "project_label": 9,
+      "original_label": 101,
+      "class_name": "cicadellidae"
+    }
+  ],
+  "expected_totals": {
+    "train": 6395,
+    "validation": 1370,
+    "test": 1370
+  }
+}

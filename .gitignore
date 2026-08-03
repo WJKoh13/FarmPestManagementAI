@@ -1,15 +1,19 @@
-#MacOS
+# macOS
 .DS_Store
 
-# Dataset - never commit images
+# Datasets - never commit images
 IP102_v1.1/
+data/
 
 # Training outputs - never commit checkpoints
 runs/
 *.pt
 *.pth
 
-# Generated manifests (regenerate with: python scripts/setup_data.py)
+# Manifests are large and fully regenerable from the committed splits_top10.json
+# (python scripts/setup_data.py). classes.json and norm_stats.json ARE committed:
+# they are small, and everyone must normalize identically for the runs to be
+# comparable.
 data_manifests/*.csv
 
 # Python
