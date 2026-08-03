@@ -1,8 +1,0 @@
-extends: _base.yaml
-
-# VGG configuration D (13 conv layers). width_mult 0.5 keeps it inside the
-# 0.5-5M parameter budget; full-width VGG16 would be ~138M.
-model: vgg16
-model_kwargs:
-  width_mult: 0.5
-  dropout: 0.4

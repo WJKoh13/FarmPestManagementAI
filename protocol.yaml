@@ -1,0 +1,93 @@
+# The locked experimental protocol. This file is the reason the comparison means
+# anything: every model, in every notebook, on every machine, trains and is
+# scored under exactly these settings.
+#
+# Changing a value here invalidates every run recorded before the change. If the
+# team agrees to change one, bump `protocol_version` and re-run everything --
+# `compare.py` refuses to put runs from different protocol versions in the same
+# table.
+
+protocol_version: 1
+
+# ---------------------------------------------------------------- dataset ----
+dataset:
+  manifest_dir: data_manifests
+  norm_stats: data_manifests/norm_stats.json
+
+  # Which subset every model trains on. scripts/setup_data.py reads this and
+  # nothing else, so switching datasets is a one-line edit here.
+  subset: detection_top10
+
+  # How the image is cropped before the transform pipeline sees it.
+  #   none -> use the whole image
+  #   box  -> crop to the annotated bounding box (subsets that provide one)
+  # `margin` expands the box by this fraction of its width/height on each side,
+  # so the model still sees a little context and is not fed an edge-to-edge
+  # insect. Clipped at the image border.
+  crop:
+    mode: box
+    margin: 0.15
+
+  subsets:
+    detection_top10:
+      description: >
+        Top ten classes of the IP102 detection subset, with bounding boxes.
+        Cropping to the box removes most of the web-scrape noise (lifecycle
+        diagrams, crop-damage-only photos) that makes the classification subset
+        hard to learn from.
+      source: detection
+      images: IP102_v1.1/Detection/VOC2007/JPEGImages
+      splits_json: image_refactor/splits_top10.json
+      boxes_json: image_refactor/boxes_top10.json
+      # Project label -> original IP102 label (0-based), in list order.
+      original_labels: [14, 15, 16, 22, 24, 48, 50, 51, 70, 101]
+      expected_totals: {train: 6395, validation: 1370, test: 1370}
+      # KNOWN ISSUE: project label 5 (original 48, "Locustoidea") does not
+      # contain locusts -- every sample inspected is a mirid plant bug, which
+      # makes it near-duplicate of project label 8 ("Miridae"). Expect 5<->8
+      # confusion that is a dataset fault, not a model fault. Say so in the
+      # writeup, or drop the class and re-run everything.
+
+    rice10:
+      description: Ten rice pests from the IP102 classification subset.
+      source: classification
+      images: IP102_v1.1/Classification/ip102_v1.1
+      original_labels: [0, 1, 3, 4, 5, 7, 8, 9, 10, 11]
+      expected_totals: {train: 4318, validation: 721, test: 2166}
+
+    all:
+      description: Full IP102 classification set, all 102 classes.
+      source: classification
+      images: IP102_v1.1/Classification/ip102_v1.1
+      original_labels: null          # null means "every class in the split files"
+      expected_totals: null          # not asserted
+
+# --------------------------------------------------------------- training ----
+# Locked. Do not vary these per model -- the architecture must be the only
+# difference between two runs.
+training:
+  image_size: 160
+  batch_size: 32
+  epochs: 60
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: weighted_cross_entropy      # inverse-frequency weights; classes are imbalanced
+  scheduler: reduce_on_plateau
+  scheduler_factor: 0.5
+  scheduler_patience: 5
+  early_stopping_patience: 10
+  seed: 42
+
+# ------------------------------------------------------------- evaluation ----
+evaluation:
+  primary_metric: macro_f1          # not accuracy -- the classes are imbalanced
+  selection_metric: val_macro_f1    # which epoch's weights get kept
+  latency_device: cpu               # the app runs offline, so CPU latency is the real cost
+
+# ---------------------------------------------------------------- runtime ----
+# Safe to change per machine. Does not affect the comparison.
+runtime:
+  device: auto                      # cuda -> mps -> cpu
+  num_workers: 4
+  output_root: runs

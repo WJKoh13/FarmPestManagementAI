@@ -1,0 +1,18 @@
+{
+  "mean": [
+    0.575311,
+    0.5746,
+    0.441945
+  ],
+  "std": [
+    0.26829,
+    0.258609,
+    0.312085
+  ],
+  "computed_from": "train split only",
+  "subset": "detection_top10",
+  "crop_mode": "box",
+  "num_images": 6395,
+  "image_size": 160,
+  "note": "Never recompute from validation or test data."
+}

@@ -1,147 +1,231 @@
-# FarmPestManagementAI
+# IP102 pest classification — model benchmark
 
-Ten-class rice-pest classification on the IP102 dataset, using six CNN
-architectures written from scratch in PyTorch. Intended for offline use, so model
-size and CPU latency count alongside accuracy.
+A shared harness for comparing pest-classification models on the same data, under
+the same training protocol, scored the same way.
 
-## Team rules
+**Everyone owns one notebook.** You define your architecture in it; the harness
+gives you the data, the training loop and the metrics. Because we all import the
+same loaders and call the same `save_run`, the numbers in the comparison table
+differ only by the thing we are actually comparing.
 
-- Never import a pretrained or prebuilt CNN. No `torchvision.models`, no
-  downloaded weights. The classic architectures are design references only.
-- Never commit images or checkpoints. Both are already in `.gitignore`.
-- Never change the official test split, and never use test performance to pick an
-  epoch or tune a hyperparameter. The validation split decides everything.
-- Never silently change anything in `configs/_base.yaml`. That file is the
-  controlled protocol; if the team agrees to change it, record the change and
-  re-run every model.
-- Ask for a code review before starting a long training run.
+---
 
-## Setup
+## Quick start
 
 ```bash
-python3.13 -m venv .venv
+git clone <repo-url> && cd FarmPestManagementAI
+python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 
-# Extracts the dataset and builds the manifests. Asserts 4318/721/2166.
-.venv/bin/python scripts/setup_data.py --tar ~/Downloads/ip102_v1.1.tar
+# One-time: build the manifests and normalization stats. Takes a few minutes.
+.venv/bin/python scripts/setup_data.py
 
-# One-time, already committed: RGB mean/std from the training split only.
-.venv/bin/python scripts/compute_norm_stats.py
-
-# 14 validation checks + the augmentation preview image.
+# 16 checks: split overlap, missing classes, unreadable images, box bounds,
+# normalization. Run this before you train anything.
 .venv/bin/python scripts/check_data.py
 ```
 
-Runs on CUDA, Apple MPS or CPU without any code change (`device: auto`).
+Then copy `notebooks/_TEMPLATE.ipynb` to `notebooks/<model>_<yourname>.ipynb` and
+fill in the two cells marked **YOUR MODEL**. That is the whole workflow.
 
-## The ten classes
+You need the IP102 images at the path in `protocol.yaml`
+(`IP102_v1.1/Detection/VOC2007/JPEGImages`). They are not in the repo — 4.8 GB.
+The template's first cell handles Colab, including mounting the images from Drive.
 
-| Project label | Original IP102 ID | Pest | Train | Val | Test |
-|---:|---:|---|---:|---:|---:|
-| 0 | 0 | rice_leaf_roller | 669 | 111 | 335 |
-| 1 | 1 | rice_leaf_caterpillar | 292 | 48 | 147 |
-| 2 | 3 | asiatic_rice_borer | 631 | 106 | 316 |
-| 3 | 4 | yellow_rice_borer | 302 | 50 | 152 |
-| 4 | 5 | rice_gall_midge | 303 | 51 | 152 |
-| 5 | 7 | brown_plant_hopper | 500 | 83 | 251 |
-| 6 | 8 | white_backed_plant_hopper | 535 | 90 | 268 |
-| 7 | 9 | small_brown_plant_hopper | 331 | 56 | 166 |
-| 8 | 10 | rice_water_weevil | 513 | 86 | 257 |
-| 9 | 11 | rice_leafhopper | 242 | 40 | 122 |
-| | | **total** | **4318** | **721** | **2166** |
+Runs on CUDA, Apple MPS or CPU with no code change (`device: auto`).
 
-Splits come straight from the official IP102 `train.txt` / `val.txt` / `test.txt`.
-No new random split is ever created.
+---
 
-## Who owns what
+## The dataset
 
-Four models, one member each:
+Top ten classes of the **IP102 detection subset**, cropped to the annotated
+bounding box with a 15% margin.
 
-| Model | Config | File | Status |
-|---|---|---|---|
-| AlexNet-style | `configs/alexnet.yaml` | `src/models/alexnet_cnn.py` | done, 1,795,018 params |
-| VGG16-style (config D) | `configs/vgg16.yaml` | `src/models/vgg_cnn.py` | stub |
-| VGG19-style (config E) | `configs/vgg19.yaml` | `src/models/vgg_cnn.py` | stub |
-| Own shallow baseline | `configs/baseline.yaml` | `src/models/baseline_cnn.py` | stub |
+| Label | Class | Original IP102 | Train | Val | Test |
+|---:|---|---:|---:|---:|---:|
+| 0 | grub | 14 | 305 | 65 | 66 |
+| 1 | mole_cricket | 15 | 608 | 130 | 130 |
+| 2 | wireworm | 16 | 298 | 64 | 63 |
+| 3 | corn_borer | 22 | 298 | 64 | 63 |
+| 4 | aphids | 24 | 615 | 132 | 132 |
+| 5 | locustoidea ⚠ | 48 | 373 | 80 | 80 |
+| 6 | legume_blister_beetle | 50 | 304 | 65 | 66 |
+| 7 | blister_beetle | 51 | 654 | 140 | 141 |
+| 8 | miridae | 70 | 886 | 190 | 189 |
+| 9 | cicadellidae | 101 | 2054 | 440 | 440 |
+| | **total** | | **6395** | **1370** | **1370** |
 
-Unassigned spares, only if the group wants more comparison rows:
+Cropping to the box is what makes this subset learnable. The IP102 classification
+images are web-scraped and roughly a third of them show crop damage, a lifecycle
+diagram or a screenshot rather than the insect. The detection boxes cut straight
+to the animal.
 
-| Model | Config | File |
-|---|---|---|
-| GoogLeNet/Inception-style | `configs/googlenet.yaml` | `src/models/googlenet_cnn.py` |
-| Custom residual | `configs/residual.yaml` | `src/models/residual_cnn.py` |
-| Lightweight separable | `configs/lightweight.yaml` | `src/models/lightweight_cnn.py` |
+### Two things to say in the report
 
-Each stub file contains the full architecture spec, the suggested layer layout,
-the target parameter count and the acceptance checks. Use
-`src/models/alexnet_cnn.py` as the worked example for conventions.
+**Class 5 is mislabeled upstream.** `Locustoidea` should be locusts and
+grasshoppers. Every sample inspected is a mirid plant bug, which makes it a
+near-duplicate of class 8 (`miridae`). Expect 5↔8 confusion in every model's
+matrix — it is a dataset fault, not a modelling failure. Do not let anyone
+present it as one.
 
-VGG16 and VGG19 differ only in their layer configuration (13 vs 16 conv layers),
-which is what makes the pair a clean depth ablation.
+**The split is ours, not IP102's.** `image_refactor/splits_top10.json` is a stratified 70/15/15
+split, not the official IP102 split, so our numbers are not directly comparable
+to published IP102 results. It is committed to git so everyone trains on the
+identical split — do not regenerate it.
+
+Also: the classes are imbalanced 6.9× (class 9 has 2054 training images, classes
+2 and 3 have 298). Hence weighted cross-entropy, and hence **macro F1 rather than
+accuracy** as the primary metric — a model that ignores the small classes
+entirely still scores well on accuracy.
+
+---
+
+## The rules
+
+1. **Never touch the test split** except through `save_run`. The best epoch is
+   chosen by *validation* macro F1. Tuning anything against test invalidates
+   every number in the table.
+2. **Never edit `protocol.yaml` for your own run.** It is the controlled
+   protocol. If the team agrees to change it, bump `protocol_version` and re-run
+   every model — `compare.py` refuses to mix versions in one table.
+3. **Set `pretrained=` honestly** in `save_run`. It is the one field that
+   silently corrupts the comparison if it is wrong.
+4. **Never commit images or checkpoints.** Both are already in `.gitignore`.
+5. Work on a branch and open a PR. `main` should always be runnable.
+
+---
 
 ## Writing your model
 
-1. Fill in your file. It must accept `[B, 3, 160, 160]` and return `[B, 10]` raw
-   logits. No softmax inside the model - `CrossEntropyLoss` expects logits.
-2. Check the shape, parameter count and that gradients flow:
-   ```bash
-   .venv/bin/python -m src.summarize --check
-   ```
-   Stay inside the agreed 0.5M-5M parameter budget and record your exact count.
-3. Prove the wiring works before burning hours on a real run:
-   ```bash
-   .venv/bin/python scripts/overfit_test.py --model residual
-   ```
-   It must reach ~100% training accuracy on 64 images. If it cannot, you have a
-   bug - the script prints the list of usual suspects.
-4. Train and evaluate:
-   ```bash
-   .venv/bin/python -m src.train --config configs/residual.yaml
-   .venv/bin/python -m src.evaluate --run runs/residual/<run_id>
-   ```
+The architecture is yours. The contract is small:
 
-Roughly 20-25 s per epoch for the baseline on an M3 (4,318 images, batch 32), so
-a full 60-epoch run is about 20-30 minutes. Deeper models take proportionally
-longer.
+- accepts `[B, 3, 160, 160]`
+- returns `[B, 10]` **raw logits** — no softmax inside the model,
+  `CrossEntropyLoss` expects logits
 
-## Run artifacts
+```python
+from ip102_bench import load_protocol, build_dataloaders, train_model, save_run
 
-Every run writes `runs/<model>/<run_id>/`:
+protocol = load_protocol()
+loaders  = build_dataloaders(protocol)
 
-```
-config.yaml             the exact config used - the run is reproducible from this
-best_model.pt           checkpoint at the best validation macro F1
-training_history.csv    per-epoch losses and metrics, written as it goes
-loss_curve.png          train vs validation loss
-metric_curve.png        validation accuracy and macro F1
-results.json            test metrics, params, size, CPU latency
-confusion_matrix.png    counts, shaded by row fraction
-predictions.csv         per-image prediction with filenames and class names
+model  = MyNet(num_classes=protocol.num_classes)
+result = train_model(model, protocol, loaders)
+
+save_run(model=model, model_name='mynet', protocol=protocol, result=result,
+         test_loader=loaders['test'], pretrained=False, author='your name')
 ```
 
-`predictions.csv` is what you use for the required error analysis - filter on
-`correct == 0` and inspect at least ten failures.
+Before a real run, use the template's overfit probe: a correct model reaches
+~100% training accuracy on 64 images within a couple of hundred steps. If it
+cannot, a full run will only spend hours proving the same thing.
 
-## Final comparison
+`train_model` applies the protocol for you — AdamW, weighted cross-entropy,
+ReduceLROnPlateau on validation macro F1, early stopping, best-epoch checkpoint.
+Write your own loop if you prefer, but then matching `protocol.yaml` exactly is
+on you.
+
+### Pretrained models are allowed, and flagged
+
+```python
+from ip102_bench.models import build_pretrained
+model = build_pretrained('resnet18', num_classes=protocol.num_classes)
+# ... and pass pretrained=True to save_run
+```
+
+The comparison table keeps scratch and pretrained models in separate groups. A
+fine-tuned ResNet is the external benchmark that tells us how much headroom our
+own architectures are leaving on the table — it is not competing with them.
+
+### Bringing a model you trained elsewhere
+
+If you already trained something in another repo or Colab session and do not want
+to retrain it:
+
+```python
+from ip102_bench import result_from_external_run, save_run
+
+result = result_from_external_run(model, history_df)   # model has its trained weights
+save_run(..., result=result, notes='trained externally, protocol not verified')
+```
+
+Nothing can verify the external run used our augmentation, schedule or split — so
+say so in `notes`, and don't let it be read as a clean comparison.
+
+---
+
+## Comparing
 
 ```bash
-.venv/bin/python -m src.summarize --compare
+.venv/bin/python -m ip102_bench.compare
+.venv/bin/python -m ip102_bench.compare --csv comparison.csv
 ```
 
-Collects every `results.json` into the comparison table. Macro F1 is the primary
-metric, but pick the final model on application suitability: it runs offline, so
-CPU latency and file size matter too.
+Collects every `results.json` under `runs/`, sorted by macro F1. Runs recorded
+under a different protocol version or subset are listed separately rather than
+mixed in.
+
+Macro F1 is the primary metric, but pick the final model on application fit: this
+runs offline, so CPU latency and model size are real costs. All three are
+recorded for every run.
+
+---
+
+## What each run writes
+
+`runs/<model_name>/<run_id>/`:
+
+```
+results.json          metrics, params, latency, protocol snapshot, environment
+training_history.csv  per-epoch losses and metrics
+best_model.pt         weights at the best validation macro F1
+predictions.csv       per-image prediction — this is your error analysis input
+curves.png            train vs validation accuracy and loss
+confusion_matrix.png  counts, shaded by row fraction
+per_class_f1.png      sorted worst-first
+```
+
+For the error analysis, filter `predictions.csv` on `correct == 0` and sort by
+confidence descending. The confident mistakes are where the model learned
+something wrong; the low-confidence ones are just hard images.
+
+---
 
 ## Layout
 
 ```
-configs/          _base.yaml holds the locked protocol; model YAMLs extend it
-data_manifests/   generated CSVs (git-ignored) + selected_classes.json
-scripts/          setup_data, compute_norm_stats, check_data, overfit_test,
-                  make_smoke_manifests
-src/data/         dataset.py, transforms.py
-src/models/       one file per architecture + the build_model registry
-src/utils/        seed, device, metrics, plots
-src/              train.py, evaluate.py, predict.py, summarize.py, config.py
-runs/             checkpoints and results (git-ignored)
+protocol.yaml         the locked protocol — image size, splits, optimizer, seed
+image_refactor/       the committed dataset definition — do not regenerate these
+  splits_top10.json   the train/val/test split everyone shares
+  boxes_top10.json    one box per image: the largest annotated object
+
+ip102_bench/          the shared harness
+  protocol.py         loads and validates protocol.yaml
+  data.py             dataset, box cropping, dataloaders, class weights
+  transforms.py       the locked augmentation and eval pipelines
+  training.py         train_model — the locked training loop
+  artifacts.py        save_run — the run artifact contract
+  metrics.py          macro F1, per-class, params, CPU latency
+  plots.py            the three standard figures
+  compare.py          the comparison table
+  models/             optional reference architectures + build_pretrained
+
+notebooks/            one per person; _TEMPLATE.ipynb is the starting point
+scripts/              setup_data.py, check_data.py
+data_manifests/       generated CSVs, classes.json, norm_stats.json
+runs/                 checkpoints and results (git-ignored)
+archive/              superseded rice-10 handoff notes and benchmark script
 ```
+
+## Switching datasets
+
+`protocol.yaml` defines three subsets: `detection_top10` (default), `rice10` (the
+old ten-class rice subset from the classification images) and `all` (full 102
+classes). Switching is one line plus a rebuild:
+
+```bash
+.venv/bin/python scripts/setup_data.py --subset rice10
+```
+
+Bump `protocol_version` if the team switches for real, so old runs don't quietly
+end up in the same table.

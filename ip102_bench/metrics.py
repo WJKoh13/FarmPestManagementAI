@@ -1,4 +1,9 @@
-"""Metrics, parameter counting and CPU latency measurement."""
+"""Metrics, parameter counting and CPU latency.
+
+Macro F1 is the primary metric, not accuracy. With `detection_top10` the largest
+class is roughly seven times the smallest, so a model that ignores the small
+classes entirely still scores well on accuracy.
+"""
 
 from __future__ import annotations
 
@@ -6,17 +11,14 @@ import time
 
 import numpy as np
 import torch
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    precision_recall_fscore_support,
-)
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 
 
 def compute_metrics(y_true, y_pred, num_classes: int) -> dict:
-    """Accuracy plus macro and per-class precision/recall/F1, and the confusion matrix.
+    """Accuracy, macro and per-class precision/recall/F1, and the confusion matrix.
 
-    ``zero_division=0`` keeps the macro average defined if a class is never predicted.
+    ``zero_division=0`` keeps the macro average defined when a class is never
+    predicted, which happens early in training.
     """
     y_true = np.asarray(y_true)
     y_pred = np.asarray(y_pred)
@@ -45,7 +47,11 @@ def compute_metrics(y_true, y_pred, num_classes: int) -> dict:
 
 
 def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
-    """Return (total parameters, trainable parameters)."""
+    """Return ``(total, trainable)`` parameter counts.
+
+    These differ for a fine-tuned pretrained model with frozen layers, which is
+    exactly why both are recorded.
+    """
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total, trainable
@@ -59,10 +65,12 @@ def measure_cpu_latency(
     runs: int = 100,
     batch_size: int = 1,
 ) -> float:
-    """Mean single-image forward latency in milliseconds, always measured on CPU.
+    """Mean single-image forward latency in ms, always measured on CPU.
 
-    The target application is offline, so CPU latency is the number that matters
-    regardless of what the model was trained on.
+    The target application runs offline on modest hardware, so CPU latency is the
+    real deployment cost no matter what the model was trained on. Measuring it on
+    CPU everywhere also makes the number comparable across the team's machines --
+    as comparable as differing CPUs allow, anyway.
     """
     was_training = model.training
     original_device = next(model.parameters()).device
