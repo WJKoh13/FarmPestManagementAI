@@ -1,0 +1,91 @@
+# Phase 8 experiment protocol: the full102 scope at the confirmed rice10 recipe.
+#
+# This is the full102 counterpart of `exp_rice10_protocol_a.yaml` (E0). It exists
+# for the same reason that file does: the shipped `model_custom.yaml` and
+# `model_baseline.yaml` differ from each other in learning rate, epochs, warmup,
+# label smoothing and patience, so layering either one alone would make a
+# comparison uninterpretable. This file states the whole `training` section
+# explicitly and is layered last, so it overrides whichever model config precedes
+# it.
+#
+# THE RECIPE IS E0, UNCHANGED. Phase 7.2 screened three variables against E0 on
+# rice10 and the E4 three-seed confirmation then tested the only survivor:
+#
+#   - E1 (100 epochs)      rejected — peak advantage inverts on the late-run mean
+#   - E2 (224x224)         NOT CONFIRMED — +0.0138 at one seed fell to +0.0079
+#                          across three and reversed on seed 7, below the 0.01
+#                          noise threshold, with 3.5x the seed-to-seed variance
+#   - E3 (crop floor 0.8)  rejected — worse on every reading
+#   - 256x256              excluded — conditional on a confirmed 224 gain
+#
+# So 160x160 is retained and the augmentation is E0's. Carrying the confirmed
+# recipe across unchanged is what makes any rice10-vs-full102 difference
+# attributable to the *task* rather than to the protocol.
+#
+# WHAT DELIBERATELY DOES NOT CHANGE, DESPITE THE IMBALANCE:
+#
+# full102 train imbalance is 82x (label 72 has 42 training images; label 101 has
+# 3,444), against rice10's 2.8x. `class_weighting` nevertheless stays `none`,
+# because no imbalance mitigation is specified in the Phase 8 protocol and
+# introducing one here would confound the scope comparison with a second change.
+# Imbalance is handled where the documents say it is handled — in the *metric*.
+# Macro F1 averages over every class including ones the model never predicts, so
+# ignoring the tail is already penalised. Weighting, resampling or a focal loss
+# are each a separate one-variable experiment to run *after* this control
+# establishes the baseline, not a change to fold into it.
+#
+# `num_classes` is absent by design: it is derived from dataset.scope (102).
+#
+# Usage — the model architecture is the only thing that varies:
+#   scripts/train.py --config model_custom.yaml   --config exp_full102_protocol_a.yaml
+#   scripts/train.py --config model_baseline.yaml --config exp_full102_protocol_a.yaml
+
+extends: data_full102.yaml
+
+dataset:
+  # Stated explicitly rather than inherited, so the retained input size is
+  # visible in this file. E4 did not confirm 224x224's gain, which is NOT the
+  # same as showing 160x160 superior — 160 is retained as the incumbent, not
+  # selected as a winner. See docs/TRAINING.md.
+  image_size: [160, 160]
+
+training:
+  optimizer: adamw
+  # The E0 midpoint rate, carried across unchanged. Neither architecture is
+  # handed its own tuned value, which is what "same protocol" has to mean.
+  learning_rate: 0.0015
+  weight_decay: 0.05
+  # 64 at 160x160 measured 852 MiB peak on full102 in the Phase 8 probe — the
+  # same as rice10, since peak step VRAM depends on batch shape and model, not
+  # on the number of classes. Well inside the conservative ~4.8 GiB free
+  # figure from risk 21.
+  batch_size: 64
+  # 60 epochs over 45,095 full102 training images is 704 steps per epoch,
+  # ~42,240 optimiser steps — 10.5x the rice10 protocol's ~4,020, because the
+  # epoch is 10.4x larger. The epoch *count* is held at E0's 60 rather than
+  # raised: E1 showed a stretched cosine did not help on rice10, and changing
+  # the budget here would be an unscreened variable.
+  epochs: 60
+  scheduler: cosine
+  warmup_epochs: 5
+  label_smoothing: 0.1
+  # See the note above: NOT a defaulted value. full102's 82x imbalance is
+  # answered by macro F1, not by reweighting the loss.
+  class_weighting: none
+  grad_clip_norm: 1.0
+  early_stopping:
+    # Macro F1, per docs/TRAINING.md: accuracy on an 82x-imbalanced task would
+    # be dominated by the largest classes and would reward ignoring the tail.
+    metric: macro_f1
+    mode: max
+    patience: 15
+    min_delta: 0.001
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: macro_f1
+
+reproducibility:
+  # Stated explicitly so the frozen protocol names its seed rather than relying
+  # on the base default.
+  seed: 1337

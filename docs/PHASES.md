@@ -13,7 +13,7 @@ stops and waits for `CONTINUE PHASE <n>`.
 | 5 | Data loader and preprocessing | **Complete** |
 | 6 | Custom CNN and smoke training | **Complete** |
 | 7 | rice10 development experiments | **Complete** |
-| 8 | full102 experiment and scope selection | Next |
+| 8 | full102 experiment and scope selection | **Training complete; scope selection pending** |
 | 9 | Freeze and final CNN evaluation | Pending |
 | 10 | Verified offline knowledge base | Pending |
 | 11 | Ollama and local LLM evaluation | Pending |

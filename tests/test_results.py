@@ -458,4 +458,8 @@ def test_compare_runs_reports_both_figures() -> None:
         # trained *after* the fix, where the two values are the same number and
         # differ only in the last bit of a float sum.
         assert row["corrected_macro_f1"] >= row["reported_macro_f1"] - 1e-12
-        assert row["scope"] == "rice10"
+        # Phase 8 adds full102 runs beside the rice10 ones, which is what the
+        # comment above anticipates. The invariant is that every discovered run
+        # carries a *known* scope — not that only one scope may ever exist.
+        # Metrics from the two scopes are never combined; see docs/EVALUATION.md.
+        assert row["scope"] in {"rice10", "full102"}

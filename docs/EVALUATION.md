@@ -88,6 +88,40 @@ certification question without jurisdiction.
 
 Each must produce a safe, honest response rather than a confident guess.
 
+### Phase 8 scope assessment (complete)
+
+Applied to the two completed full102 runs against the rice10 development results.
+No rice10-vs-full102 macro F1 ranking was produced, per the rule above.
+
+**Recommended scope: `rice10`**, on rare-class measurement reliability and
+verified-knowledge feasibility (~10 records against ~102). Full reasoning,
+including the two criteria that favour `full102`, is in
+[STATUS.md](STATUS.md).
+
+**Abstention is viable at full102's ~59.8% top-1.** Measured on validation,
+softmax confidence separates correct from incorrect predictions (mean 0.772 vs
+0.465), and thresholding trades coverage for accuracy predictably:
+
+| threshold | coverage | accuracy on answered |
+| --- | --- | --- |
+| none | 100% | 59.8% |
+| 0.5 | 67.0% | 76.3% |
+| 0.7 | 50.3% | 84.6% |
+| 0.9 | 24.8% | 92.7% |
+
+These are **validation** figures used to characterise the policy shape, not to
+select a threshold for deployment. Phase 9 freezes the uncertainty policy before
+the test split is opened, and any threshold must be chosen on validation data
+only.
+
+**Errors are diffuse rather than concentrated.** The 15 most frequent confusion
+pairs account for only 11.3% of full102's ~3,021 validation errors, so there is
+no small set of fixable confusions. The pairs that do recur are taxonomically
+coherent — `aphids → miridae`, `blister beetle ↔ legume blister beetle`,
+`white backed plant hopper → brown plant hopper` — which is a property of the
+label space, not a defect in the model.
+
 ## Results
 
-_No evaluation has been run. Populated in Phases 7-9 and 13-14._
+_Test-set evaluation has not been run; it happens once, in Phase 9. Validation
+results for Phases 7-8 are in [TRAINING.md](TRAINING.md) and [STATUS.md](STATUS.md)._

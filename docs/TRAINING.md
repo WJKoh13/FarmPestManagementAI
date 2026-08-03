@@ -125,6 +125,19 @@ Estimated wall-clock from Phase 1 measurements:
 | rice10 | 4,318 | ~8-20 s | ~15-35 min |
 | full102 | 45,095 | ~80-170 s | ~2.5-5.5 h |
 
+**Superseded for full102 by Phase 8 measurement.** The figures above are Phase 1
+hardware extrapolations. Two complete 60-epoch runs on the real loader measured:
+
+| Scope | Model | Measured epoch | Measured run |
+| --- | --- | --- | --- |
+| full102 | `custom_cnn` | ~49 s | **49.4 min** |
+| full102 | `baseline_cnn` | ~119 s | **118.6 min** |
+
+So the custom model is ~3x faster than the original estimate's midpoint, while
+the baseline lands inside it. Parameter count is a poor proxy for cost here: the
+baseline has 20% *fewer* parameters and takes 2.4x longer, because factorised
+convolutions cost far fewer FLOPs than a dense `3x3` stack.
+
 Data loading is not the bottleneck: 449.7 img/s single-process warm, well above
 what one GPU consumes at this input size.
 
@@ -537,7 +550,9 @@ cost with no argued benefit.
 
 The test split was never built by any of these runs.
 
-#### E4 recommendation (proposed, not run)
+#### E4 recommendation (proposed before the confirmation ran)
+
+_Superseded by the three-seed result below, which did not confirm it._
 
 **Recommended E4 = E2 alone: 224x224, 60 epochs, crop 0.6–1.0.**
 
@@ -564,6 +579,120 @@ it only on a meaningful 224 gain. +0.0138 clears the stated 0.01 threshold but i
 within run noise, so the honest position is that the 160 → 224 gain is
 *suggestive but unconfirmed*. Deciding 256 before the three-seed confirmation
 would be building on the weaker of two available readings.
+
+### E4 three-seed confirmation (complete) — 224 is NOT confirmed
+
+Six runs, `custom_cnn`, one at a time, seeds 1337 / 2024 / 7. The two arms are
+the E0 protocol (160x160) and the E2 protocol (224x224); nothing else differs.
+No run built the test split, and all six recorded `amp_skipped_steps 0`.
+
+| size | seed | best epoch | best macro F1 | last-10 mean |
+| --- | --- | --- | --- | --- |
+| 160 | 1337 | 60 | 0.5913 | 0.5832 |
+| 160 | 2024 | 40 (stopped 55) | 0.5916 | 0.5790 |
+| 160 | 7 | 57 | 0.5980 | 0.5892 |
+| 224 | 1337 | 59 | 0.6052 | 0.5993 |
+| 224 | 2024 | 50 | **0.6126** | 0.6018 |
+| 224 | 7 | 48 | **0.5869** | 0.5814 |
+
+| arm | best: mean ± sd | range (spread) | last-10: mean ± sd |
+| --- | --- | --- | --- |
+| 160 | 0.5936 ± 0.0038 | 0.5913–0.5980 (0.0067) | 0.5838 ± 0.0052 |
+| 224 | 0.6015 ± 0.0132 | 0.5869–0.6126 (**0.0257**) | 0.5942 ± 0.0112 |
+| **224 − 160** | **+0.0079** | — | **+0.0104** |
+
+**The single-seed E2 result did not survive.** Seed 1337 reproduced Phase 7.2
+exactly — 0.5913 at 160 and 0.6052 at 224, matching E0 and E2 to four decimals,
+which independently re-confirms end-to-end reproducibility (risk 19). But the
+other two seeds disagree with each other about the sign:
+
+| paired 224 − 160 | best | last-10 mean |
+| --- | --- | --- |
+| seed 1337 | +0.0138 | +0.0161 |
+| seed 2024 | +0.0210 | +0.0229 |
+| seed 7 | **−0.0112** | **−0.0079** |
+
+**Seed 7 at 224 (0.5869) scores below all three 160 runs.** The mean advantage
+falls from the single-seed +0.0138 to **+0.0079**, which is *below* the 0.01
+threshold this project set for "distinguishable from seed noise", and it is
+smaller than the 224 arm's own seed spread of 0.0257. Two arms whose ranges
+overlap this heavily — 160 spans 0.5913–0.5980, 224 spans 0.5869–0.6126 — are
+not separated by three samples each.
+
+**The 224 arm is also markedly less stable**: sd 0.0132 against 0.0038, a 3.5x
+larger seed-to-seed variance, and its best epoch wanders (48, 50, 59) where the
+160 arm's clusters late (40, 57, 60). A setting that is both unconfirmed on the
+mean and noisier per seed is the weaker default, not the stronger one.
+
+**Verdict: 224x224 is not confirmed and is not adopted as the Phase 8 input
+size.** The evidence is genuinely ambiguous rather than negative — the mean does
+favour 224 on both readings, and 2 of 3 seeds favour it — but "favoured by an
+underpowered test" is not the standard this project set before running it.
+Retaining 160x160 also costs 1.8x less VRAM (858 vs 1,529 MiB) and ~36% less
+wall clock per run, which matters directly for full102.
+
+**256x256 is now firmly excluded.** The rule was to consider it only on a
+meaningful 224 gain, and the confirmation removed rather than strengthened that
+gain.
+
+**What would settle it.** Three seeds per arm cannot resolve a ~0.008 difference
+against a ~0.013 sd; a rough power estimate puts the requirement near 20+ seeds
+per arm, which is ~4 hours of rice10 compute for a question whose answer is worth
+under one macro-F1 point. The better use of that budget is full102, where the
+task is harder and the input-size question may behave differently — 28.9% of
+full102 training images have a short side below 224 px against 4.0% below 160 px,
+so 224 upscales far more of that data than it does here.
+
+The test split was never built by any of these runs.
+
+### Phase 8 — full102 results (complete)
+
+Both arms under the frozen `exp_full102_protocol_a.yaml`, seed 1337, 160x160,
+`class_weighting: none`, 60 epochs. No test split was built.
+
+| | `baseline_cnn` | `custom_cnn` |
+| --- | --- | --- |
+| Parameters | 1,172,518 | 1,470,662 |
+| **Validation macro F1** | 0.4258 | **0.5443** |
+| Last-10 mean | 0.4224 | **0.5410** |
+| Balanced accuracy | 0.3889 | **0.5231** |
+| Accuracy | 0.5436 | **0.5976** |
+| Top-5 accuracy | 0.7997 | **0.8201** |
+| Best epoch | 60 / 60 (still climbing) | 54 / 60 (plateaued) |
+| Classes never predicted | 4 | **0** |
+| Peak VRAM | 1,995.7 MiB | **858.3 MiB** |
+| Wall clock | 118.6 min | **49.4 min** |
+
+`custom_cnn` wins **86 of 102 classes** by +0.1185 macro F1. Both readings agree
+to 0.0001, so the verdict does not depend on peak-versus-mean. Still single-seed
+(risk 35), and the baseline's figure is a floor since it had not converged at the
+cap (risk 36).
+
+**The advantage concentrates on the rare tail** — mean per-class F1 by validation
+support quartile:
+
+| quartile | support | `baseline_cnn` | `custom_cnn` | Δ |
+| --- | --- | --- | --- | --- |
+| Q1 rarest | 7–26 | 0.2681 | **0.4767** | **+0.2086** |
+| Q2 | 26–47 | 0.4842 | 0.5859 | +0.1017 |
+| Q3 | 48–80 | 0.4375 | 0.5544 | +0.1169 |
+| Q4 largest | 82–573 | 0.5037 | 0.5589 | +0.0552 |
+
+The gap on the rarest quartile is 3.8x the gap on the largest, which is why
+balanced accuracy separates the arms (+0.1342) far more than raw accuracy
+(+0.0541). Under an unweighted loss the baseline abandoned 4 classes entirely;
+the custom model abandoned none.
+
+`custom_cnn` also converges much faster: macro F1 0.40 at epoch **21** against
+the baseline's **44**.
+
+**AMP under 704-step epochs.** Both arms recorded exactly **16 skipped steps out
+of 42,240 (0.0379%)** under the identical dynamic-scaling policy — near-identical
+totals across two different architectures, which is what identifies the skips as
+a property of the shared policy rather than of either model. rice10's 67-step
+epochs produced zero skips over 4,020 steps; the rates are consistent. The
+schedule tracked the theoretical cosine to within 5.7e-07 throughout, so no skip
+advanced the learning rate past a step that did not happen.
 
 ### Smoke figures (Phase 6, not results)
 

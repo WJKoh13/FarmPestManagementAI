@@ -27,6 +27,7 @@ STANDALONE = [
     "exp_rice10_e1_epochs100.yaml",
     "exp_rice10_e2_224.yaml",
     "exp_rice10_e3_crop08.yaml",
+    "exp_full102_protocol_a.yaml",
     "app.yaml",
     "llm.yaml",
 ]
@@ -205,6 +206,103 @@ def test_the_rice10_comparison_holds_the_protocol_identical(configs_dir: Path) -
     assert model_config_from_config(baseline).name == "baseline_cnn"
     assert model_config_from_config(custom).name == "custom_cnn"
     assert baseline.num_classes == custom.num_classes == 10
+
+
+def test_full102_protocol_differs_from_rice10_e0_only_in_scope(
+    configs_dir: Path,
+) -> None:
+    """Phase 8 carries the confirmed rice10 recipe across unchanged.
+
+    The scope comparison is only interpretable if the *task* is the one thing
+    that changed. E4 did not confirm 224x224's gain over 160x160 — which is not
+    the same as showing 160 superior — so 160 is *retained* and the Phase 8
+    protocol reuses the E0 recipe verbatim; if a future edit retunes a field
+    here, this fails rather than silently producing a scope result that is
+    partly a protocol result.
+    """
+    from farm_pest_ai.vision.training import training_config_from_config
+
+    rice10 = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_rice10_protocol_a.yaml"),
+        ]
+    )
+    full102 = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_full102_protocol_a.yaml"),
+        ]
+    )
+
+    # Every field the trainer reads is identical across the two scopes.
+    assert (
+        training_config_from_config(rice10).to_dict()
+        == training_config_from_config(full102).to_dict()
+    )
+    # As is the preprocessing, including the input size E4 retained.
+    assert rice10.get("dataset.image_size") == full102.get("dataset.image_size")
+    assert list(full102.get("dataset.image_size")) == [160, 160]
+    assert rice10.get("preprocessing.augmentation") == full102.get(
+        "preprocessing.augmentation"
+    )
+    assert rice10.get("reproducibility.seed") == full102.get("reproducibility.seed")
+
+    # And the one thing that must differ.
+    assert rice10.get("dataset.scope") == "rice10"
+    assert full102.get("dataset.scope") == "full102"
+    assert rice10.num_classes == 10
+    assert full102.num_classes == 102
+
+
+def test_full102_protocol_holds_the_protocol_identical_across_arms(
+    configs_dir: Path,
+) -> None:
+    """Both architectures resolve to the same protocol under Phase 8, as in Phase 7."""
+    from farm_pest_ai.vision.models import model_config_from_config
+    from farm_pest_ai.vision.training import training_config_from_config
+
+    experiment = config_path(configs_dir, "exp_full102_protocol_a.yaml")
+    baseline = load_config([config_path(configs_dir, "model_baseline.yaml"), experiment])
+    custom = load_config([config_path(configs_dir, "model_custom.yaml"), experiment])
+
+    assert (
+        training_config_from_config(baseline).to_dict()
+        == training_config_from_config(custom).to_dict()
+    )
+    for key in (
+        "dataset.scope",
+        "dataset.image_size",
+        "reproducibility.seed",
+        "preprocessing.augmentation",
+        "runtime.amp",
+    ):
+        assert baseline.get(key) == custom.get(key), f"{key} differs between the arms"
+
+    assert model_config_from_config(baseline).name == "baseline_cnn"
+    assert model_config_from_config(custom).name == "custom_cnn"
+    assert baseline.num_classes == custom.num_classes == 102
+
+
+def test_full102_protocol_applies_no_imbalance_mitigation(configs_dir: Path) -> None:
+    """82x imbalance is answered by the metric, not by reweighting the loss.
+
+    No imbalance mitigation is specified in the Phase 8 protocol, so introducing
+    one would confound the scope comparison with a second change. Weighting or
+    resampling is a separate one-variable experiment to run after this control.
+    This pins the choice as deliberate rather than defaulted.
+    """
+    config = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_full102_protocol_a.yaml"),
+        ]
+    )
+    assert config.get("training.class_weighting") == "none"
+    # Selection and early stopping still run on macro F1, which is what makes
+    # ignoring the rare tail costly.
+    assert config.get("training.early_stopping.metric") == "macro_f1"
+    assert config.get("training.checkpoint.monitor") == "macro_f1"
 
 
 #: The Phase 7.2 screening experiments, each with the single field it is
