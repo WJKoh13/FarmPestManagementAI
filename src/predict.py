@@ -33,7 +33,12 @@ def main() -> None:
     class_names = checkpoint["class_names"]
 
     mean, std = load_norm_stats(resolve_path(config["norm_stats"]))
-    transform = build_eval_transform(config["image_size"], mean, std)
+    transform = build_eval_transform(
+        config["image_size"],
+        mean,
+        std,
+        profile=config.get("eval_profile", "resize_center_crop"),
+    )
 
     image_path = resolve_path(args.image)
     with Image.open(image_path) as img:

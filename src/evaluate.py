@@ -90,7 +90,12 @@ def main() -> None:
     dataset = IP102ClassificationDataset(
         manifest_path=resolve_path(config[manifest_key]),
         dataset_root=resolve_path(config["dataset_root"]),
-        transform=build_eval_transform(config["image_size"], mean, std),
+        transform=build_eval_transform(
+            config["image_size"],
+            mean,
+            std,
+            profile=config.get("eval_profile", "resize_center_crop"),
+        ),
         return_path=True,
     )
     loader = DataLoader(

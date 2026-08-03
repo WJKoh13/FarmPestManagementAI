@@ -1,8 +1,8 @@
 # FarmPestManagementAI
 
-Ten-class rice-pest classification on the IP102 dataset, using six CNN
-architectures written from scratch in PyTorch. Intended for offline use, so model
-size and CPU latency count alongside accuracy.
+Ten-class rice-pest classification on the IP102 dataset, using CNN architectures
+written from scratch in PyTorch. Intended for offline use, so model size and CPU
+latency count alongside accuracy.
 
 ## Team rules
 
@@ -55,7 +55,8 @@ No new random split is ever created.
 
 ## Who owns what
 
-Four models, one member each:
+The shared architecture candidates are listed below. I added a baseline and tuned
+deep V2 experiment
 
 | Model | Config | File | Status |
 |---|---|---|---|
@@ -63,6 +64,8 @@ Four models, one member each:
 | VGG16-style (config D) | `configs/vgg16.yaml` | `src/models/vgg_cnn.py` | stub |
 | VGG19-style (config E) | `configs/vgg19.yaml` | `src/models/vgg_cnn.py` | stub |
 | Own shallow baseline | `configs/baseline.yaml` | `src/models/baseline_cnn.py` | stub |
+| Justin baseline | `configs/justin_baseline.yaml` | `src/models/justin_baseline_cnn.py` | done, migrated |
+| Justin deep V2 | `configs/justin_deep_v2.yaml` | `src/models/justin_deep_cnn.py` | done, 1,241,578 params |
 
 Unassigned spares, only if the group wants more comparison rows:
 
@@ -100,6 +103,16 @@ which is what makes the pair a clean depth ablation.
    .venv/bin/python -m src.evaluate --run runs/residual/<run_id>
    ```
 
+To reproduce the tuned deep V2 experiment with the shared repository trainer:
+
+```bash
+.venv/bin/python -m src.train --config configs/justin_deep_v2.yaml
+```
+
+Alternatively, open `notebooks/IP102_Justin_Deep_CNN.ipynb` and run it from the
+repository root or from the `notebooks/` directory. It writes to
+`runs/justin_deep_cnn_v2/`.
+
 Roughly 20-25 s per epoch for the baseline on an M3 (4,318 images, batch 32), so
 a full 60-epoch run is about 20-30 minutes. Deeper models take proportionally
 longer.
@@ -136,9 +149,12 @@ CPU latency and file size matter too.
 
 ```
 configs/          _base.yaml holds the locked protocol; model YAMLs extend it
+benchmarks/       optional pretrained benchmarks, for comparison only
 data_manifests/   generated CSVs (git-ignored) + selected_classes.json
+docs/             reference documents
+notebooks/        active experiment notebooks plus superseded copies in archive/
 scripts/          setup_data, compute_norm_stats, check_data, overfit_test,
-                  make_smoke_manifests
+                  make_smoke_manifests; legacy/ preserves the old V2 runner
 src/data/         dataset.py, transforms.py
 src/models/       one file per architecture + the build_model registry
 src/utils/        seed, device, metrics, plots

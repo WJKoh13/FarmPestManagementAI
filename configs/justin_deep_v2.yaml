@@ -1,0 +1,16 @@
+extends: _base.yaml
+
+# Tuned follow-up to the original deep notebook. This is intentionally not the
+# locked architecture-only comparison profile in _base.yaml.
+model: justin_deep_v2
+model_kwargs:
+  classifier_dropout: 0.20
+  stage_dropouts: [0.00, 0.00, 0.05, 0.10]
+
+epochs: 50
+learning_rate: 0.0005
+scheduler_patience: 3
+early_stopping_patience: 10
+norm_stats: configs/notebook_half_range_norm.json
+augmentation_profile: deep_v2
+eval_profile: stretch

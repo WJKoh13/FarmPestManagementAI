@@ -19,6 +19,8 @@ import torch.nn as nn
 from .alexnet_cnn import build_alexnet_cnn
 from .baseline_cnn import build_baseline_cnn
 from .googlenet_cnn import build_googlenet_cnn
+from .justin_baseline_cnn import build_justin_baseline_cnn
+from .justin_deep_cnn import build_justin_deep_cnn
 from .lightweight_cnn import build_lightweight_cnn
 from .residual_cnn import build_residual_cnn
 from .vgg_cnn import build_vgg16_cnn, build_vgg19_cnn
@@ -29,6 +31,8 @@ MODEL_REGISTRY = {
     "vgg16": build_vgg16_cnn,        # deep sequential, VGG config D
     "vgg19": build_vgg19_cnn,        # deep sequential, VGG config E
     "baseline": build_baseline_cnn,  # the team's own shallow architecture
+    "justin_baseline": build_justin_baseline_cnn,
+    "justin_deep_v2": build_justin_deep_cnn,
     # Unassigned spares - implement only if the group wants more comparison rows
     "googlenet": build_googlenet_cnn,      # multi-scale / inception blocks
     "residual": build_residual_cnn,        # manual skip connections

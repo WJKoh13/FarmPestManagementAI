@@ -50,12 +50,22 @@ def build_dataloaders(config: dict, mean, std) -> tuple[DataLoader, DataLoader, 
     train_set = IP102ClassificationDataset(
         manifest_path=resolve_path(config["train_manifest"]),
         dataset_root=dataset_root,
-        transform=build_train_transform(image_size, mean, std),
+        transform=build_train_transform(
+            image_size,
+            mean,
+            std,
+            profile=config.get("augmentation_profile", "controlled_v1"),
+        ),
     )
     val_set = IP102ClassificationDataset(
         manifest_path=resolve_path(config["val_manifest"]),
         dataset_root=dataset_root,
-        transform=build_eval_transform(image_size, mean, std),
+        transform=build_eval_transform(
+            image_size,
+            mean,
+            std,
+            profile=config.get("eval_profile", "resize_center_crop"),
+        ),
     )
 
     generator = torch.Generator()

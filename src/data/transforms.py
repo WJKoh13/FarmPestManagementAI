@@ -31,8 +31,33 @@ def load_norm_stats(path: str | Path | None = None) -> tuple[list[float], list[f
     return stats["mean"], stats["std"]
 
 
-def build_train_transform(image_size: int, mean: list[float], std: list[float]):
-    """Augmentation strong enough to regularize, mild enough to keep the pest visible."""
+def build_train_transform(
+    image_size: int,
+    mean: list[float],
+    std: list[float],
+    profile: str = "controlled_v1",
+):
+    """Build the named training profile without changing other experiments."""
+    if profile == "deep_v2":
+        return transforms.Compose(
+            [
+                transforms.RandomResizedCrop(image_size, scale=(0.90, 1.00)),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(degrees=15),
+                transforms.ColorJitter(
+                    brightness=0.2,
+                    contrast=0.2,
+                    saturation=0.1,
+                ),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=mean, std=std),
+            ]
+        )
+    if profile != "controlled_v1":
+        raise ValueError(
+            f"Unknown training transform profile {profile!r}; "
+            "expected 'controlled_v1' or 'deep_v2'."
+        )
     return transforms.Compose(
         [
             # Rotate BEFORE cropping: rotating a 160x160 crop leaves black wedges in
@@ -55,8 +80,26 @@ def build_train_transform(image_size: int, mean: list[float], std: list[float]):
     )
 
 
-def build_eval_transform(image_size: int, mean: list[float], std: list[float]):
-    """Deterministic pipeline for validation and test. No random augmentation."""
+def build_eval_transform(
+    image_size: int,
+    mean: list[float],
+    std: list[float],
+    profile: str = "resize_center_crop",
+):
+    """Build a deterministic validation/test preprocessing profile."""
+    if profile == "stretch":
+        return transforms.Compose(
+            [
+                transforms.Resize((image_size, image_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=mean, std=std),
+            ]
+        )
+    if profile != "resize_center_crop":
+        raise ValueError(
+            f"Unknown evaluation transform profile {profile!r}; "
+            "expected 'resize_center_crop' or 'stretch'."
+        )
     resize_to = int(round(image_size * 1.14))  # 160 -> 182, then center crop to 160
     return transforms.Compose(
         [
