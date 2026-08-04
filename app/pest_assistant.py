@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLASSES_PATH = PROJECT_ROOT / "data_manifests" / "classes_top15.json"
 
 # Below this top-1 probability the assistant offers candidates instead of an
-# identification. The model is 69.2% top-1 against 86.5% top-3 even when fully
+# identification. The model is 77.0% top-1 against 93.3% top-3 even when fully
 # trained, so naming one pest confidently is the wrong shape of answer near the
 # margin -- and a farmer acting on a wrong name wastes a treatment.
 CONFIDENCE_FLOOR = 0.35
@@ -149,6 +149,7 @@ class PestAssistant:
         return predict_topk(
             self.model, Path(image_path), self.class_names, self.views,
             k=k, tta=tta, device=self.device, box=box,
+            prior=self.loaded.train_class_prior, tau=self.loaded.logit_adjust_tau,
         )
 
     # ----------------------------------------------------------------- context

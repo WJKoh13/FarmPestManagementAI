@@ -76,9 +76,38 @@ def crop_to_box(image: Image.Image, box: list[float] | None, margin: float = 0.2
     )
 
 
+def adjust_for_prior(probabilities: torch.Tensor,
+                     prior: list[float] | torch.Tensor | None,
+                     tau: float) -> torch.Tensor:
+    """Divide out the training prior raised to ``tau``, then renormalise.
+
+    The notebook's section 13 in one line, and it must stay that line: the
+    ``tau`` the app applies was selected on the validation split against exactly
+    this arithmetic, so a different formula here would apply a correction nobody
+    measured.
+
+    Training weighted the loss by inverse class frequency, which corrects for
+    imbalance but can overcorrect -- ``tau`` is the measured amount to push back.
+    No prior or ``tau`` of zero means no correction, which is what checkpoints
+    written before section 13 existed get.
+
+    Takes the prior as a list or a tensor, and a single row or a batch. The
+    notebook holds it as a tensor and the checkpoint stores a list, and a
+    function that accepted only one of those would be a trap for whichever
+    caller reached for the other.
+    """
+    if tau == 0.0 or prior is None or len(prior) == 0:
+        return probabilities
+    weights = torch.as_tensor(prior, dtype=probabilities.dtype).pow(tau)
+    adjusted = probabilities / weights
+    return adjusted / adjusted.sum(dim=-1, keepdim=True)
+
+
 @torch.inference_mode()
 def predict_probabilities(model, image: Image.Image, views: dict, *, tta: bool = True,
-                          device: str | torch.device = "cpu") -> torch.Tensor:
+                          device: str | torch.device = "cpu",
+                          prior: list[float] | None = None,
+                          tau: float = 0.0) -> torch.Tensor:
     """Class probabilities for one image, averaged over the TTA views."""
     used = TTA_VIEWS if tta else ("centre",)
     probabilities = None
@@ -92,16 +121,18 @@ def predict_probabilities(model, image: Image.Image, views: dict, *, tta: bool =
         for pass_batch in passes:
             softmax = torch.softmax(model(pass_batch), dim=1)[0].cpu()
             probabilities = softmax if probabilities is None else probabilities + softmax
-    return probabilities / probabilities.sum()
+    probabilities = probabilities / probabilities.sum()
+    return adjust_for_prior(probabilities, prior, tau)
 
 
 def predict_topk(model, image: Image.Image | str | Path, class_names: list[str], views: dict,
                  *, k: int = 3, tta: bool = True, device: str | torch.device = "cpu",
-                 box: list[float] | None = None) -> list[tuple[str, float]]:
+                 box: list[float] | None = None, prior: list[float] | None = None,
+                 tau: float = 0.0) -> list[tuple[str, float]]:
     """Top-k ``(class_name, probability)`` for one photo, most confident first.
 
     Top-3 rather than top-1 is the deliberate presentation: the model reaches
-    86.5% top-3 against 69.2% top-1, so three candidates with confidences is
+    93.3% top-3 against 77.0% top-1, so three candidates with confidences is
     both more accurate and more useful to a farmer than one confident-looking
     guess.
     """
@@ -112,6 +143,7 @@ def predict_topk(model, image: Image.Image | str | Path, class_names: list[str],
         image = image.convert("RGB")
 
     image = crop_to_box(image, box)
-    probabilities = predict_probabilities(model, image, views, tta=tta, device=device)
+    probabilities = predict_probabilities(model, image, views, tta=tta, device=device,
+                                          prior=prior, tau=tau)
     confidences, indices = probabilities.topk(min(k, len(class_names)))
     return [(class_names[i], float(c)) for c, i in zip(confidences, indices)]

@@ -41,7 +41,7 @@ from ip102_bench.protocol import load_protocol  # noqa: E402
 
 # Below this validation macro-F1 the run is not the submitted model, and every
 # surface that shows a prediction has to say so. docs/propestnet.md reports
-# 0.6084 for the finished 60-epoch run.
+# 0.6045 for the finished 60-epoch run.
 UNDER_TRAINED_VAL_F1 = 0.55
 
 
@@ -61,6 +61,10 @@ def main() -> None:
                         help="best_model.pt written by the notebook (a bare state_dict)")
     parser.add_argument("--history", type=Path,
                         help="history.csv from the same run; supplies the metrics")
+    parser.add_argument("--notebook-results", type=Path,
+                        help="results.json from the same run. Carries over the test "
+                             "metrics and the section-13 prior correction, which this "
+                             "script cannot measure for itself")
     parser.add_argument("--run-id", help="output folder name (default: today + epochs)")
     parser.add_argument("--model-name", default="propestnet",
                         help="registry key to rebuild the architecture with")
@@ -103,6 +107,18 @@ def main() -> None:
     epochs_run = len(history_rows)
     under_trained = best_val_f1 < UNDER_TRAINED_VAL_F1
 
+    # Only what the notebook actually measured. Absent file -> absent numbers.
+    notebook_results: dict = {}
+    if args.notebook_results and args.notebook_results.is_file():
+        notebook_results = json.loads(args.notebook_results.read_text(encoding="utf-8"))
+
+    adjustment = notebook_results.get("logit_adjustment") or {}
+    prior = list(adjustment.get("train_class_prior") or [])
+    tau = float(adjustment.get("tau", 0.0))
+    if prior and len(prior) != len(class_names):
+        sys.exit(f"ERROR: {args.notebook_results} records a {len(prior)}-class prior, "
+                 f"but this subset has {len(class_names)} classes.")
+
     run_id = args.run_id or (
         f"{datetime.now():%Y%m%d}_epoch{epochs_run}" if epochs_run else f"{datetime.now():%Y%m%d}"
     )
@@ -118,6 +134,10 @@ def main() -> None:
             "image_size": image_size,
             "mean": mean,
             "std": std,
+            # Travels with the weights, so a bundle copied to another machine
+            # keeps the correction the notebook selected for it.
+            "logit_adjust_tau": tau,
+            "train_class_prior": prior,
             "state_dict": state_dict,
         },
         run_dir / "best_model.pt",
@@ -133,18 +153,24 @@ def main() -> None:
         "epochs_run": epochs_run,
         "best_epoch": int(best_row.get("epoch", 0) or 0),
         "best_val_macro_f1": best_val_f1,
-        # No test split was scored by this import -- only the notebook does
-        # that. Left null rather than copied from the README, so nothing here
-        # can be mistaken for a measurement this bundle actually made.
-        "test": None,
+        # No test split is scored by this import -- only the notebook does that.
+        # Carried over when --notebook-results names the file the notebook
+        # wrote, and left null otherwise, so nothing here can be mistaken for a
+        # measurement this bundle actually made.
+        "test": notebook_results.get("test"),
         "under_trained": under_trained,
         "imported_from": str(args.checkpoint),
         "imported_at": datetime.now().isoformat(timespec="seconds"),
     }
+    for section in ("test_with_tta", "test_with_tta_and_prior", "logit_adjustment",
+                    "tta_validation_sweep"):
+        if notebook_results.get(section) is not None:
+            results[section] = notebook_results[section]
+
     if under_trained:
         results["under_trained_note"] = (
             f"Best validation macro-F1 {best_val_f1:.4f} over {epochs_run} epochs. "
-            "The submitted model reaches 0.6084 over 60 epochs (docs/propestnet.md). "
+            "The submitted model reaches 0.6045 over 60 epochs (docs/propestnet.md). "
             "Predictions from this bundle are for testing the app, not for advice."
         )
 
