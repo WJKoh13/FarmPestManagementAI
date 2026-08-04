@@ -25,10 +25,12 @@ from .alexnet_cnn import build_alexnet_cnn
 from .baseline_cnn import build_baseline_cnn
 from .googlenet_cnn import build_googlenet_cnn
 from .lightweight_cnn import build_lightweight_cnn
+from .propestnet import build_propestnet
 from .residual_cnn import build_residual_cnn
 from .vgg_cnn import build_vgg16_cnn, build_vgg19_cnn
 
 SCRATCH_REGISTRY = {
+    "propestnet": build_propestnet,
     "alexnet": build_alexnet_cnn,
     "vgg16": build_vgg16_cnn,
     "vgg19": build_vgg19_cnn,
@@ -39,7 +41,7 @@ SCRATCH_REGISTRY = {
 }
 
 
-def build_model(name: str, num_classes: int = 10, **kwargs) -> nn.Module:
+def build_model(name: str, num_classes: int = 15, **kwargs) -> nn.Module:
     """Instantiate a from-scratch architecture with randomly initialized weights."""
     if name not in SCRATCH_REGISTRY:
         raise KeyError(f"Unknown model '{name}'. Registered: {sorted(SCRATCH_REGISTRY)}")
