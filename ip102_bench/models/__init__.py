@@ -23,6 +23,7 @@ import torch.nn as nn
 
 from .alexnet_cnn import build_alexnet_cnn
 from .baseline_cnn import build_baseline_cnn
+from .custom_cnn import build_custom_cnn_ziyang
 from .googlenet_cnn import build_googlenet_cnn
 from .lightweight_cnn import build_lightweight_cnn
 from .propestnet import build_propestnet
@@ -38,6 +39,9 @@ SCRATCH_REGISTRY = {
     "googlenet": build_googlenet_cnn,
     "residual": build_residual_cnn,
     "lightweight": build_lightweight_cnn,
+    # Stable key: the app and scripts/import_custom_cnn_run.py rebuild the
+    # architecture from this name alone. Renaming it orphans every checkpoint.
+    "custom_cnn_ziyang": build_custom_cnn_ziyang,
 }
 
 
