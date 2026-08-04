@@ -78,14 +78,19 @@ def crop_to_box(image: Image.Image, box: list[float] | None, margin: float = 0.2
 
 @torch.inference_mode()
 def predict_probabilities(model, image: Image.Image, views: dict, *, tta: bool = True,
-                          device: str | torch.device = "cpu") -> torch.Tensor:
+                          device: str | torch.device = "cpu",
+                          view_names: list[str] | tuple[str, ...] | None = None,
+                          tta_flip: bool = TTA_FLIP) -> torch.Tensor:
     """Class probabilities for one image, averaged over the TTA views."""
-    used = TTA_VIEWS if tta else ("centre",)
+    configured = tuple(view_names or TTA_VIEWS)
+    if not configured or any(name not in views for name in configured):
+        raise ValueError(f"Unknown or empty inference view configuration: {configured}")
+    used = configured if tta else configured[:1]
     probabilities = None
     for name in used:
         batch = views[name](image).unsqueeze(0).to(device)
         passes = [batch]
-        if tta and TTA_FLIP:
+        if tta and tta_flip:
             # dims=[3] is the width axis: a mirror of the tensor, cheaper than
             # and exactly equivalent to flipping the PIL image.
             passes.append(torch.flip(batch, dims=[3]))
@@ -97,7 +102,9 @@ def predict_probabilities(model, image: Image.Image, views: dict, *, tta: bool =
 
 def predict_topk(model, image: Image.Image | str | Path, class_names: list[str], views: dict,
                  *, k: int = 3, tta: bool = True, device: str | torch.device = "cpu",
-                 box: list[float] | None = None) -> list[tuple[str, float]]:
+                 box: list[float] | None = None,
+                 view_names: list[str] | tuple[str, ...] | None = None,
+                 tta_flip: bool = TTA_FLIP) -> list[tuple[str, float]]:
     """Top-k ``(class_name, probability)`` for one photo, most confident first.
 
     Top-3 rather than top-1 is the deliberate presentation: the model reaches
@@ -112,6 +119,9 @@ def predict_topk(model, image: Image.Image | str | Path, class_names: list[str],
         image = image.convert("RGB")
 
     image = crop_to_box(image, box)
-    probabilities = predict_probabilities(model, image, views, tta=tta, device=device)
+    probabilities = predict_probabilities(
+        model, image, views, tta=tta, device=device,
+        view_names=view_names, tta_flip=tta_flip,
+    )
     confidences, indices = probabilities.topk(min(k, len(class_names)))
     return [(class_names[i], float(c)) for c, i in zip(confidences, indices)]

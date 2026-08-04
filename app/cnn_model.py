@@ -38,6 +38,10 @@ class LoadedModel:
     image_size: int = DEFAULT_IMAGE_SIZE
     mean: list[float] = field(default_factory=lambda: list(DEFAULT_MEAN))
     std: list[float] = field(default_factory=lambda: list(DEFAULT_STD))
+    inference_views: list[str] = field(default_factory=lambda: ["centre", "whole"])
+    tta_flip: bool = True
+    use_box_crop: bool = True
+    protocol_warning: str = ""
     results: dict = field(default_factory=dict)
 
     @property
@@ -193,7 +197,8 @@ def _try_load(
         )
 
     try:
-        model = build_model(model_name, num_classes=checkpoint_classes)
+        model_kwargs = checkpoint.get("model_kwargs") or results.get("model_kwargs") or {}
+        model = build_model(model_name, num_classes=checkpoint_classes, **model_kwargs)
         model.load_state_dict(state_dict, strict=True)
     except (KeyError, NotImplementedError, RuntimeError) as error:
         return LoadedModel(reason=f"weights do not fit {model_name}: {type(error).__name__}")
@@ -212,5 +217,14 @@ def _try_load(
         image_size=int(checkpoint.get("image_size", results.get("image_size", DEFAULT_IMAGE_SIZE))),
         mean=list(checkpoint.get("mean", DEFAULT_MEAN)),
         std=list(checkpoint.get("std", DEFAULT_STD)),
+        inference_views=list(
+            checkpoint.get("inference_views", results.get("inference_views", ["centre", "whole"]))
+        ),
+        tta_flip=bool(checkpoint.get("tta_flip", results.get("tta_flip", True))),
+        use_box_crop=bool(checkpoint.get("use_box_crop", results.get("use_box_crop", True))),
+        protocol_warning=(
+            str(results.get("benchmark_note", ""))
+            if results.get("benchmark_compatible") is False else ""
+        ),
         results=results,
     )

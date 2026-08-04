@@ -24,6 +24,7 @@ import torch.nn as nn
 from .alexnet_cnn import build_alexnet_cnn
 from .baseline_cnn import build_baseline_cnn
 from .googlenet_cnn import build_googlenet_cnn
+from .justin_deep_cnn import build_justin_deep_cnn
 from .lightweight_cnn import build_lightweight_cnn
 from .propestnet import build_propestnet
 from .residual_cnn import build_residual_cnn
@@ -36,6 +37,7 @@ SCRATCH_REGISTRY = {
     "vgg19": build_vgg19_cnn,
     "baseline": build_baseline_cnn,
     "googlenet": build_googlenet_cnn,
+    "justin_deep_v2": build_justin_deep_cnn,
     "residual": build_residual_cnn,
     "lightweight": build_lightweight_cnn,
 }

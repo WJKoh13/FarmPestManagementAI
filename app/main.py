@@ -43,6 +43,7 @@ def read_root() -> dict[str, object]:
         "message": "Organic Farm Pest Assistant is running",
         "model_loaded": assistant.model is not None,
         "model_path": str(assistant.loaded.path) if assistant.loaded.path else None,
+        "device": str(assistant.device),
         "num_classes": len(assistant.class_names),
         "under_trained": assistant.loaded.under_trained,
         "status": assistant.status_message,
@@ -58,6 +59,7 @@ def health() -> dict[str, object]:
         "classifier": {
             "loaded": assistant.model is not None,
             "path": str(assistant.loaded.path) if assistant.loaded.path else None,
+            "device": str(assistant.device),
             "under_trained": assistant.loaded.under_trained,
             "reason": assistant.loaded.reason,
         },

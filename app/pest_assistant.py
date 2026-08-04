@@ -92,7 +92,14 @@ class PestAssistant:
     def __init__(self, device: str | None = None, model_path: str | Path | None = None,
                  llm: OllamaClient | None = None) -> None:
         if torch is not None:
-            self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+            if device is None:
+                if torch.cuda.is_available():
+                    device = "cuda"
+                elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                    device = "xpu"
+                else:
+                    device = "cpu"
+            self.device = torch.device(device)
         else:
             self.device = "cpu"
 
@@ -133,6 +140,8 @@ class PestAssistant:
             return f"No pest model is loaded. {self.loaded.reason}"
         if self.loaded.under_trained:
             return self.loaded.reason or "This checkpoint is under-trained; treat results as a test only."
+        if self.loaded.protocol_warning:
+            return self.loaded.protocol_warning
         return ""
 
     def display_name_for(self, slug: str) -> str:
@@ -148,7 +157,10 @@ class PestAssistant:
 
         return predict_topk(
             self.model, Path(image_path), self.class_names, self.views,
-            k=k, tta=tta, device=self.device, box=box,
+            k=k, tta=tta, device=self.device,
+            box=box if self.loaded.use_box_crop else None,
+            view_names=self.loaded.inference_views,
+            tta_flip=self.loaded.tta_flip,
         )
 
     # ----------------------------------------------------------------- context

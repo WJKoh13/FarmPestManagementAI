@@ -403,7 +403,7 @@ ip102_bench/          the shared harness
 
 app/                  the offline pest-assistant chatbot — see below
 notebooks/            one per person; _TEMPLATE.ipynb is the starting point
-scripts/              setup_data.py, check_data.py, import_propestnet_run.py
+scripts/              data checks plus checkpoint importers for the app
 docs/propestnet.md    ProPestNet: architecture, results, ablation, dataset
 data_manifests/       the committed dataset definition + generated CSVs
   splits_top15.json   the train/val/test split everyone shares
@@ -418,19 +418,49 @@ archive/              superseded rice-10 handoff notes and benchmark script
 ## The chatbot
 
 `app/` is the farmer-facing side: upload a photo, get an identification and
-organic treatment guidance, fully offline. It serves **ProPestNet**, the model
-documented in `docs/propestnet.md`, at its own preprocessing (128px, ImageNet
-normalization) rather than the harness defaults — the app reads those settings
-from the checkpoint, so the two can never drift apart silently.
+organic treatment guidance, fully offline. It can serve any registered model
+whose run bundle contains `best_model.pt` and `results.json`. The app reads the
+image size, normalization, inference views, and class order from that bundle so
+different models do not silently share the wrong preprocessing.
+Device selection is automatic: CUDA first, then Intel XPU, then CPU.
 
 ```bash
 .venv/bin/python -m streamlit run app/streamlit_app.py    # chat UI
 .venv/bin/python -m uvicorn app.main:app --port 8000      # /analyze, /chat, /health
 ```
 
+On Windows PowerShell, using this workspace's environment:
+
+```powershell
+..\.venv-xpu\Scripts\python.exe -m streamlit run app\streamlit_app.py
+..\.venv-xpu\Scripts\python.exe -m uvicorn app.main:app --port 8000
+```
+
 The app loads the highest-scoring run from `runs/`. To make a trained ProPestNet
 checkpoint available to it, see `scripts/import_propestnet_run.py --help`. With
 no usable checkpoint the app says so in a banner rather than serving noise.
+
+Justin's selected epoch-48 DeepV2 checkpoint can be packaged without training
+or re-evaluation:
+
+```powershell
+..\.venv-xpu\Scripts\python.exe scripts\import_deep_v2_run.py
+```
+
+This creates
+`runs/justin_deep_v2/broad15_epoch48_external/{best_model.pt,results.json}`.
+DeepV2 is registered as `justin_deep_v2` and is served with its validated
+160x160 whole-image stretch and half-range normalization. Its 64.41% accuracy
+and 61.23% macro-F1 came from the official IP102 **classification** test split,
+not this repository's `detection_top15` benchmark. The app therefore displays a
+protocol warning and the result must not be placed in the controlled benchmark
+table.
+
+The `runs/` directory remains Git-ignored. Share `best_model.pt` separately as a
+GitHub Release asset, approved shared-drive artifact, deployment volume, or via
+Git LFS if the whole team agrees to adopt LFS. After downloading it on another
+machine, place it beside the generated `results.json` in the run
+directory above, or run the importer against the downloaded source checkpoint.
 
 ### The language model
 

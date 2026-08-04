@@ -24,7 +24,7 @@ data_manifests/*.csv
 *.h5
 *.hdf5
 *.ckpt
-*.pt
+# *.pt
 *.pth
 *.pb
 *.tflite
