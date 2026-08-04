@@ -13,11 +13,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from app.cnn_model import find_runs, load_best_model  # noqa: E402
+from app.cnn_model import describe_runs, find_runs, load_best_model  # noqa: E402
 from app.conversation import Conversation, PestContext  # noqa: E402
 from app.ollama_client import OllamaClient  # noqa: E402
 from app.pest_assistant import CONFIDENCE_FLOOR, PestAssistant, load_class_metadata  # noqa: E402
 from app.treatment_guides import GENERIC_GUIDE, TREATMENT_GUIDES, treatment_guide  # noqa: E402
+from tests.run_bundles import write_legacy_custom_cnn_bundle, write_run_bundle  # noqa: E402
 
 
 def offline_assistant() -> PestAssistant:
@@ -34,6 +35,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 IMAGE_DIR = PROJECT_ROOT / "IP102_v1.1" / "Detection" / "VOC2007" / "JPEGImages"
 SPLITS = PROJECT_ROOT / "data_manifests" / "splits_top15.json"
 
+# The two end-to-end tests below measure a *real* trained checkpoint against
+# real photos -- a synthetic bundle of random weights cannot tell you whether
+# preprocessing matches training. They are therefore the only tests that read
+# the repository's runs/, and they skip when it is empty. Every other test
+# builds what it needs under tmp_path.
 needs_model = pytest.mark.skipif(
     load_best_model(num_classes=15).model is None, reason="no usable checkpoint in runs/"
 )
@@ -67,27 +73,173 @@ def test_class_list_matches_the_split_file():
 
 
 # --------------------------------------------------------------- model loading
-def test_loader_rejects_a_checkpoint_with_the_wrong_class_count():
-    """A 10-class checkpoint under 15 class names would mislabel every photo."""
-    loaded = load_best_model(num_classes=999)
+# These build the runs they need under tmp_path. Reading the repository's real
+# runs/ made them pass or fail on what a developer happened to have imported.
+def test_loader_rejects_a_checkpoint_with_the_wrong_class_count(tmp_path):
+    """A 15-class checkpoint under 999 class names would mislabel every photo."""
+    write_run_bundle(tmp_path, num_classes=15)
+
+    loaded = load_best_model(num_classes=999, runs_dir=tmp_path)
+
     assert loaded.model is None
     assert "classes" in loaded.reason
 
 
-def test_run_discovery_finds_runs_at_both_depths():
+def test_loader_reports_when_there_is_nothing_to_load(tmp_path):
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+    assert loaded.model is None
+    assert "No run in runs/" in loaded.reason
+
+
+def test_run_discovery_finds_runs_at_both_depths(tmp_path):
     """runs/<run>/ and runs/<model>/<run>/ both exist in this repo."""
-    runs = find_runs()
-    if not runs:
-        pytest.skip("no runs on this machine")
+    write_run_bundle(tmp_path, model_name="propestnet", run_id="deep")
+    # The shallow layout: runs/<run>/ with no model directory above it.
+    shallow = write_run_bundle(tmp_path, model_name="propestnet", run_id="tmp")
+    shallow.rename(tmp_path / "shallow")
+
+    runs = find_runs(tmp_path)
+
+    assert len(runs) == 2
     assert all(path.name == "best_model.pt" for _, path, _ in runs)
 
 
-@needs_model
-def test_loaded_model_reports_its_own_preprocessing():
-    loaded = load_best_model(num_classes=15)
+def test_loaded_model_reports_its_own_preprocessing(tmp_path):
+    """Preprocessing comes off the checkpoint, not from a constant in the app."""
+    write_run_bundle(tmp_path, image_size=128, mean=[0.485, 0.456, 0.406])
+
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+
+    assert loaded.model is not None
     assert loaded.image_size == 128
     assert loaded.mean == pytest.approx([0.485, 0.456, 0.406])
     assert len(loaded.class_names) == 15
+
+
+# ------------------------------------------------- automatic vs explicit choice
+def test_an_ineligible_run_is_never_chosen_automatically(tmp_path):
+    """The legacy import scores higher, and must still lose to the official run.
+
+    Its 0.66 was measured under a different protocol. If discovery ranked on
+    score alone, an explicitly non-comparable number would take the top slot.
+    """
+    write_run_bundle(tmp_path, model_name="propestnet", run_id="official",
+                     results_extra={"best_val_macro_f1": 0.42})
+    write_legacy_custom_cnn_bundle(tmp_path, best_val_macro_f1=0.99)
+
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+
+    assert loaded.model is not None
+    assert loaded.path.parent.name == "official"
+    # The official run's 128px, not the legacy bundle's 160px.
+    assert loaded.image_size == 128
+    assert loaded.crop_margin == pytest.approx(0.25)
+
+
+def test_discovery_omits_ineligible_runs(tmp_path):
+    write_legacy_custom_cnn_bundle(tmp_path)
+
+    assert find_runs(tmp_path) == []
+    # ...but they are still discoverable when explicitly asked for.
+    assert len(find_runs(tmp_path, include_ineligible=True)) == 1
+
+
+def test_an_ineligible_run_is_not_served_even_when_it_is_the_only_one(tmp_path):
+    write_legacy_custom_cnn_bundle(tmp_path)
+
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+
+    assert loaded.model is None
+
+
+def test_an_ineligible_run_still_loads_when_selected_by_path(tmp_path):
+    """Excluded from automatic selection is not the same as unusable."""
+    run_dir = write_legacy_custom_cnn_bundle(tmp_path)
+
+    loaded = load_best_model(num_classes=15, model_path=run_dir / "best_model.pt")
+
+    assert loaded.model is not None
+    assert loaded.image_size == 160
+    assert loaded.mean == pytest.approx([0.485, 0.456, 0.406])
+    assert loaded.std == pytest.approx([0.229, 0.224, 0.225])
+    assert loaded.crop_margin == pytest.approx(0.15)
+
+
+def test_bundles_without_the_new_field_stay_eligible(tmp_path):
+    """Backwards compatibility: an older bundle has no opinion, so it is usable."""
+    write_run_bundle(tmp_path)  # writes no eligible_for_automatic_selection
+
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+
+    assert loaded.model is not None
+
+
+def test_the_picker_lists_an_ineligible_run_and_flags_it(tmp_path):
+    write_legacy_custom_cnn_bundle(tmp_path)
+
+    described = describe_runs(num_classes=15, runs_dir=tmp_path)
+
+    assert len(described) == 1
+    assert described[0]["usable"] is True
+    assert described[0]["eligible_for_automatic_selection"] is False
+    assert described[0]["comparable_to_main"] is False
+
+
+# ------------------------------------------------------------- the crop contract
+def test_an_imported_custom_cnn_crops_with_its_own_margin(tmp_path):
+    run_dir = write_legacy_custom_cnn_bundle(tmp_path)
+
+    loaded = load_best_model(num_classes=15, model_path=run_dir / "best_model.pt")
+
+    assert loaded.crop_mode == "box"
+    assert loaded.crop_margin == pytest.approx(0.15)
+
+
+def test_a_bundle_without_crop_metadata_keeps_the_protocol_default(tmp_path):
+    """Existing checkpoints must be fed exactly what they were fed before."""
+    write_run_bundle(tmp_path)  # writes no crop_mode / crop_margin
+
+    loaded = load_best_model(num_classes=15, runs_dir=tmp_path)
+
+    assert loaded.crop_margin == pytest.approx(0.25)
+
+
+def test_the_loaded_margin_reaches_the_crop(tmp_path, monkeypatch):
+    """The margin must travel from the checkpoint into crop_to_box, not be re-typed."""
+    from PIL import Image
+
+    import app.propest_inference as inference
+
+    run_dir = write_legacy_custom_cnn_bundle(tmp_path)
+    assistant = PestAssistant(model_path=run_dir / "best_model.pt",
+                              llm=OllamaClient(base_url="http://127.0.0.1:9"))
+
+    seen: list[float] = []
+    original = inference.crop_to_box
+
+    def spy(image, box, margin=0.25):
+        seen.append(margin)
+        return original(image, box, margin=margin)
+
+    monkeypatch.setattr(inference, "crop_to_box", spy)
+
+    photo = tmp_path / "photo.jpg"
+    Image.new("RGB", (400, 300), "green").save(photo)
+    assistant.predict(photo, box=[50, 50, 250, 200], tta=False)
+
+    assert seen == [pytest.approx(0.15)]
+
+
+def test_a_box_crop_model_warns_about_uncropped_photos(tmp_path):
+    """A farmer's upload has no box; the app must say that is out of distribution."""
+    run_dir = write_legacy_custom_cnn_bundle(tmp_path)
+    assistant = PestAssistant(model_path=run_dir / "best_model.pt",
+                              llm=OllamaClient(base_url="http://127.0.0.1:9"))
+
+    message = assistant.status_message
+
+    assert "cropped insect boxes" in message
+    assert "0.15" in message
 
 
 # -------------------------------------------------------------------- the chat

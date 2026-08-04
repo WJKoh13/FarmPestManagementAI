@@ -22,6 +22,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 
+from app.cnn_model import DEFAULT_CROP_MARGIN
 from ip102_bench.transforms import build_eval_transform
 
 # The notebook's validation-selected setting. Views are averaged in softmax
@@ -54,12 +55,15 @@ def build_views(image_size: int, mean: list[float], std: list[float]) -> dict:
     }
 
 
-def crop_to_box(image: Image.Image, box: list[float] | None, margin: float = 0.25) -> Image.Image:
+def crop_to_box(image: Image.Image, box: list[float] | None,
+                margin: float = DEFAULT_CROP_MARGIN) -> Image.Image:
     """Crop to an annotated insect box, keeping ``margin`` of context each side.
 
     Only the offline evaluation has boxes. A farmer's photo has none, and the
     image is returned untouched -- the same behaviour the notebook's
-    ``crop_to_insect`` has for unannotated images.
+    ``crop_to_insect`` has for unannotated images. For a model trained purely on
+    box crops that untouched path is distribution shift; the caller is expected
+    to say so rather than pretend the prediction is as reliable.
     """
     if not box:
         return image
@@ -135,6 +139,10 @@ def predict_topk(model, image: Image.Image | str | Path, class_names: list[str],
     93.3% top-3 against 77.0% top-1, so three candidates with confidences is
     both more accurate and more useful to a farmer than one confident-looking
     guess.
+
+    ``crop_margin`` must be the margin the weights were trained with -- the
+    caller reads it off the checkpoint. It defaults to the locked protocol's
+    0.25 so checkpoints that record no margin behave exactly as before.
     """
     if isinstance(image, (str, Path)):
         with Image.open(image) as handle:
@@ -145,5 +153,7 @@ def predict_topk(model, image: Image.Image | str | Path, class_names: list[str],
     image = crop_to_box(image, box)
     probabilities = predict_probabilities(model, image, views, tta=tta, device=device,
                                           prior=prior, tau=tau)
+    image = crop_to_box(image, box, margin=crop_margin)
+    probabilities = predict_probabilities(model, image, views, tta=tta, device=device)
     confidences, indices = probabilities.topk(min(k, len(class_names)))
     return [(class_names[i], float(c)) for c, i in zip(confidences, indices)]

@@ -18,6 +18,12 @@ DEFAULT_IMAGE_SIZE = 128
 DEFAULT_MEAN = [0.485, 0.456, 0.406]
 DEFAULT_STD = [0.229, 0.224, 0.225]
 
+# Box-crop defaults. 0.25 is the locked protocol's margin and stays the fallback
+# for every checkpoint written before crop metadata existed -- changing what
+# those bundles are fed would silently alter predictions they were validated on.
+DEFAULT_CROP_MODE = "box"
+DEFAULT_CROP_MARGIN = 0.25
+
 
 @dataclass
 class LoadedModel:
@@ -43,6 +49,11 @@ class LoadedModel:
     # what every checkpoint written before that section existed gets.
     logit_adjust_tau: float = 0.0
     train_class_prior: list[float] = field(default_factory=list)
+    # How the box was cropped during training. Part of the preprocessing
+    # contract for the same reason mean/std are: a model trained on 0.15-margin
+    # crops and served 0.25-margin ones is being fed a distribution it never saw.
+    crop_mode: str = DEFAULT_CROP_MODE
+    crop_margin: float = DEFAULT_CROP_MARGIN
     results: dict = field(default_factory=dict)
 
     @property
@@ -53,6 +64,14 @@ class LoadedModel:
     def adjusts_for_prior(self) -> bool:
         """Whether this checkpoint carries a usable prior correction."""
         return bool(self.train_class_prior) and self.logit_adjust_tau != 0.0
+    def trained_on_box_crops(self) -> bool:
+        """Whether a photo with no annotated box is out of distribution here.
+
+        The legacy custom_cnn import only ever saw box crops, so a farmer's
+        uncropped upload is distribution shift. Surfaces that serve predictions
+        say so rather than quietly answering anyway.
+        """
+        return self.crop_mode == "box"
 
 
 def _score(results: dict) -> float:
@@ -74,11 +93,39 @@ def _score(results: dict) -> float:
     return -1.0
 
 
-def find_runs(runs_dir: Path = PROJECT_ROOT / "runs") -> list[tuple[float, Path, dict]]:
+def is_eligible_for_automatic_selection(results: dict) -> bool:
+    """Whether automatic discovery may pick this run on its own.
+
+    A run opts *out* by recording ``eligible_for_automatic_selection: false``.
+    Bundles written before that field existed have no opinion and stay eligible,
+    so this cannot change what an existing checkout serves.
+
+    The field exists because an externally trained run carries a validation
+    score measured under a different protocol. Ranking it against official runs
+    would let a number that is explicitly ``comparable_to_main: false`` win the
+    top slot -- so it is excluded from automatic selection while remaining
+    loadable by explicit path.
+    """
+    flag = results.get("eligible_for_automatic_selection")
+    if flag is not None:
+        return bool(flag)
+    # Belt and braces: an external, non-comparable run is never an automatic
+    # default even if it predates the explicit flag.
+    if results.get("external") and results.get("comparable_to_main") is False:
+        return False
+    return True
+
+
+def find_runs(runs_dir: Path = PROJECT_ROOT / "runs",
+              *, include_ineligible: bool = False) -> list[tuple[float, Path, dict]]:
     """Every run holding both a checkpoint and a results.json, best first.
 
     Searches ``runs/<run>/`` and ``runs/<model>/<run>/`` -- both layouts exist
     in this repo, and globbing only the deeper one made real runs invisible.
+
+    Runs that opted out of automatic selection are omitted unless
+    ``include_ineligible`` is set, which the model picker uses so a human can
+    still choose one deliberately.
     """
     candidates: list[tuple[float, Path, dict]] = []
     seen: set[Path] = set()
@@ -92,6 +139,8 @@ def find_runs(runs_dir: Path = PROJECT_ROOT / "runs") -> list[tuple[float, Path,
             except (OSError, ValueError):
                 continue
             seen.add(checkpoint)
+            if not include_ineligible and not is_eligible_for_automatic_selection(results):
+                continue
             candidates.append((_score(results), checkpoint, results))
     return sorted(candidates, key=lambda item: item[0], reverse=True)
 
@@ -123,7 +172,9 @@ def describe_runs(num_classes: int | None = None,
     reported from the metadata and confirmed at load time.
     """
     described: list[dict] = []
-    for score, checkpoint, results in find_runs(runs_dir):
+    # Ineligible runs are listed: a human may still pick one on purpose, and
+    # hiding it entirely would make the imported legacy bundle look missing.
+    for score, checkpoint, results in find_runs(runs_dir, include_ineligible=True):
         classes = results.get("classes") or []
         label = str(checkpoint.parent.relative_to(runs_dir))
         # The class count is checked first because it is the one problem that
@@ -154,6 +205,7 @@ def describe_runs(num_classes: int | None = None,
         else:
             display_label = f"{model} — {accuracy:.0%} accurate"
 
+        automatic = is_eligible_for_automatic_selection(results)
         described.append({
             "label": label,
             "display_label": display_label,
@@ -165,18 +217,27 @@ def describe_runs(num_classes: int | None = None,
             "under_trained": under_trained,
             "usable": not problem,
             "problem": problem,
+            "eligible_for_automatic_selection": automatic,
+            "comparable_to_main": results.get("comparable_to_main", True),
+            "note": "" if automatic else str(results.get("not_comparable_note", "")),
         })
     return described
 
 
 def load_best_model(
-    *, num_classes: int | None = None, device: str = "cpu", model_path: str | Path | None = None
+    *, num_classes: int | None = None, device: str = "cpu", model_path: str | Path | None = None,
+    runs_dir: Path | None = None,
 ) -> LoadedModel:
     """Load the highest-scoring usable run in ``runs/``.
 
     ``num_classes``, when given, rejects runs trained on a different class list.
     A ten-class checkpoint loaded under fifteen class names would answer every
     photo with a confidently wrong name.
+
+    ``model_path`` loads one bundle explicitly, bypassing discovery entirely --
+    that is how a run excluded from automatic selection is still served on
+    purpose. ``runs_dir`` redirects discovery, which lets tests build an
+    isolated set of bundles instead of reading whatever the developer has.
     """
     if torch is None:
         return LoadedModel(reason="PyTorch is not installed in the environment running this app.")
@@ -194,7 +255,7 @@ def load_best_model(
                 results = {}
         candidates = [(_score(results), path, results)]
     else:
-        candidates = find_runs()
+        candidates = find_runs(runs_dir) if runs_dir is not None else find_runs()
 
     if not candidates:
         return LoadedModel(
@@ -275,5 +336,9 @@ def _try_load(
         std=list(checkpoint.get("std", DEFAULT_STD)),
         logit_adjust_tau=float(tau),
         train_class_prior=[float(value) for value in prior],
+        # Absent on every bundle written before crop metadata existed, which is
+        # why the protocol's 0.25 remains the fallback rather than an error.
+        crop_mode=str(checkpoint.get("crop_mode", DEFAULT_CROP_MODE)),
+        crop_margin=float(checkpoint.get("crop_margin", DEFAULT_CROP_MARGIN)),
         results=results,
     )
