@@ -1,163 +1,172 @@
 # FarmPestManagementAI
 
-Ten-class rice-pest classification on the IP102 dataset, using CNN architectures
-written from scratch in PyTorch. Intended for offline use, so model size and CPU
-latency count alongside accuracy.
+Scratch-built CNN classification for a broad set of 15 farm pests from IP102.
+The primary experiment compares the team's own shallow baseline against its own
+Deep V2 model. Both networks are defined layer by layer and trained from random
+initialization: no pretrained weights, transfer learning, `torchvision.models`,
+or copied named architecture is used.
+
+The earlier ten-class rice-pest experiment is retained as historical evidence.
+Its results must not be compared numerically with Broad15 results because the
+class set and dataset size are different.
+
+## Broad15 goal
+
+The application goal is to classify one image into one of these 15 selected
+farm-pest categories.
+
+| Project label | IP102 ID | Class | Train | Validation | Test |
+|---:|---:|---|---:|---:|---:|
+| 0 | 14 | grub | 516 | 86 | 258 |
+| 1 | 15 | mole_cricket | 989 | 165 | 495 |
+| 2 | 16 | wireworm | 532 | 88 | 267 |
+| 3 | 18 | black_cutworm | 512 | 85 | 257 |
+| 4 | 22 | corn_borer | 1,018 | 170 | 510 |
+| 5 | 23 | army_worm | 642 | 107 | 322 |
+| 6 | 24 | aphids | 2,456 | 409 | 1,229 |
+| 7 | 37 | flea_beetle | 473 | 79 | 237 |
+| 8 | 45 | flax_budworm | 639 | 107 | 320 |
+| 9 | 47 | tarnished_plant_bug | 492 | 82 | 246 |
+| 10 | 51 | blister_beetle | 1,138 | 189 | 570 |
+| 11 | 69 | cicadella_viridis | 767 | 128 | 384 |
+| 12 | 70 | miridae | 3,048 | 508 | 1,525 |
+| 13 | 86 | prodenia_litura | 782 | 130 | 392 |
+| 14 | 101 | cicadellidae | 3,444 | 573 | 1,723 |
+| | | **Total** | **17,448** | **2,906** | **8,735** |
+
+These are zero-based original labels in the IP102 split files. The tracked
+source of truth is
+[`data_manifests/broad15_classes.json`](data_manifests/broad15_classes.json).
+The selection is an evidence-based quality shortlist, not an entomologist's
+certification of every image. The dataset limitations, development history,
+frozen Deep V2 validation result, and one-time test result are consolidated in
+[`docs/MODEL_DEVELOPMENT_EVIDENCE.md`](docs/MODEL_DEVELOPMENT_EVIDENCE.md).
 
 ## Team rules
 
-- Never import a pretrained or prebuilt CNN. No `torchvision.models`, no
-  downloaded weights. The classic architectures are design references only.
-- Never commit images or checkpoints. Both are already in `.gitignore`.
-- Never change the official test split, and never use test performance to pick an
-  epoch or tune a hyperparameter. The validation split decides everything.
-- Never silently change anything in `configs/_base.yaml`. That file is the
-  controlled protocol; if the team agrees to change it, record the change and
-  re-run every model.
-- Ask for a code review before starting a long training run.
+- Do not import a pretrained or prebuilt CNN and do not download weights.
+- Do not commit the IP102 images or model checkpoints; both are ignored.
+- Preserve IP102's official train, validation, and test splits.
+- Use validation macro-F1 for model selection. Do not tune against the test set.
+- Use the same Broad15 protocol for baseline and Deep V2 so the architecture is
+  the controlled difference.
+- Keep seed 42 for reproducibility. A later robustness study may repeat the
+  chosen model with several seeds.
 
-## Setup
+## Prepare the data
 
-```bash
-python3.13 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+On Windows, create or refresh the project environment first:
 
-# Extracts the dataset and builds the manifests. Asserts 4318/721/2166.
-.venv/bin/python scripts/setup_data.py --tar ~/Downloads/ip102_v1.1.tar
-
-# One-time, already committed: RGB mean/std from the training split only.
-.venv/bin/python scripts/compute_norm_stats.py
-
-# 14 validation checks + the augmentation preview image.
-.venv/bin/python scripts/check_data.py
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Runs on CUDA, Apple MPS or CPU without any code change (`device: auto`).
+Then extract IP102 so this folder exists:
 
-## The ten classes
+```text
+IP102_v1.1/Classification/ip102_v1.1/
+```
 
-| Project label | Original IP102 ID | Pest | Train | Val | Test |
-|---:|---:|---|---:|---:|---:|
-| 0 | 0 | rice_leaf_roller | 669 | 111 | 335 |
-| 1 | 1 | rice_leaf_caterpillar | 292 | 48 | 147 |
-| 2 | 3 | asiatic_rice_borer | 631 | 106 | 316 |
-| 3 | 4 | yellow_rice_borer | 302 | 50 | 152 |
-| 4 | 5 | rice_gall_midge | 303 | 51 | 152 |
-| 5 | 7 | brown_plant_hopper | 500 | 83 | 251 |
-| 6 | 8 | white_backed_plant_hopper | 535 | 90 | 268 |
-| 7 | 9 | small_brown_plant_hopper | 331 | 56 | 166 |
-| 8 | 10 | rice_water_weevil | 513 | 86 | 257 |
-| 9 | 11 | rice_leafhopper | 242 | 40 | 122 |
-| | | **total** | **4318** | **721** | **2166** |
+Generate the ignored Broad15 CSV manifests from the official split files:
 
-Splits come straight from the official IP102 `train.txt` / `val.txt` / `test.txt`.
-No new random split is ever created.
+```bash
+python scripts/build_subset_manifests.py --definition data_manifests/broad15_classes.json
+```
 
-## Who owns what
+The command validates the class names and exact split totals. It does not create
+a new random split. The older `scripts/setup_data.py` command creates the legacy
+Rice10 manifests and is not the Broad15 preparation command.
 
-The shared architecture candidates are listed below. I added a baseline and tuned
-deep V2 experiment
+## Retrain the two models
 
-| Model | Config | File | Status |
-|---|---|---|---|
-| AlexNet-style | `configs/alexnet.yaml` | `src/models/alexnet_cnn.py` | done, 1,795,018 params |
-| VGG16-style (config D) | `configs/vgg16.yaml` | `src/models/vgg_cnn.py` | stub |
-| VGG19-style (config E) | `configs/vgg19.yaml` | `src/models/vgg_cnn.py` | stub |
-| Own shallow baseline | `configs/baseline.yaml` | `src/models/baseline_cnn.py` | stub |
-| Justin baseline | `configs/justin_baseline.yaml` | `src/models/justin_baseline_cnn.py` | done, migrated |
-| Justin deep V2 | `configs/justin_deep_v2.yaml` | `src/models/justin_deep_cnn.py` | done, 1,241,578 params |
+Use either the notebooks or the shared command-line trainer. Do not launch both
+routes for the same run.
 
-Unassigned spares, only if the group wants more comparison rows:
+### Notebook route
 
-| Model | Config | File |
+1. Open [`notebooks/IP102_Broad15_Baseline_CNN.ipynb`](notebooks/IP102_Broad15_Baseline_CNN.ipynb).
+2. Restart the kernel, confirm `QUICK_RUN = True`, and use **Run All** for a
+   three-epoch pipeline check.
+3. Restart the kernel again, set `QUICK_RUN = False`, and use **Run All** for the
+   real baseline run.
+4. Repeat the two checks with
+   [`notebooks/IP102_Broad15_Deep_CNN_V2.ipynb`](notebooks/IP102_Broad15_Deep_CNN_V2.ipynb).
+
+The notebooks report validation results only. That is intentional: do not use
+the test results to decide between the two models.
+
+### Command-line route
+
+```bash
+python -m src.train --config configs/broad15_baseline.yaml
+python -m src.train --config configs/broad15_deep_v2.yaml
+```
+
+On a supported Intel Arc environment, `device: auto` selects PyTorch XPU. It
+can also be requested explicitly with `--device xpu`. The trainer appends the
+history and atomically writes `last_checkpoint.pt` after every completed epoch.
+Resume the same run directory with:
+
+```bash
+python -m src.train --config configs/broad15_deep_v2.yaml \
+  --resume runs/broad15/justin_deep_v2/<run_id>/last_checkpoint.pt
+```
+
+The resume checkpoint includes the model, optimizer, scheduler, global epoch,
+early-stopping state, history, and main-process random-number states. On
+Windows, `--num-workers 0` gives the most reliable stochastic continuation
+because no persistent data-loader worker state exists outside the checkpoint.
+
+Both configurations inherit
+[`configs/_broad15_base.yaml`](configs/_broad15_base.yaml), which locks the
+same manifests, image size, augmentation, normalization, optimizer settings,
+learning rate, scheduler, epoch limit, early stopping, loss, and seed.
+
+## Fair comparison and final test
+
+Compare the best validation macro-F1, per-class F1, confusion matrix, parameter
+count, checkpoint size, and CPU latency. Accuracy is useful but is not the main
+score because Broad15 is imbalanced.
+
+Only after the team freezes the winning architecture and settings, evaluate the
+single selected run on the untouched test set:
+
+```bash
+python -m src.evaluate --run runs/broad15/<model>/<run_id>
+```
+
+Report both test accuracy and macro-F1, plus per-class results. Do not repeatedly
+evaluate different variants on the test set. Evaluation artifacts are prefixed
+with `validation_` or `test_`, and the command refuses to replace an existing
+result unless `--force` is explicitly supplied.
+
+## Models
+
+| Experiment | Configuration | Scratch-built implementation |
 |---|---|---|
-| GoogLeNet/Inception-style | `configs/googlenet.yaml` | `src/models/googlenet_cnn.py` |
-| Custom residual | `configs/residual.yaml` | `src/models/residual_cnn.py` |
-| Lightweight separable | `configs/lightweight.yaml` | `src/models/lightweight_cnn.py` |
+| Broad15 baseline | `configs/broad15_baseline.yaml` | `src/models/justin_baseline_cnn.py` |
+| Broad15 Deep V2 | `configs/broad15_deep_v2.yaml` | `src/models/justin_deep_cnn.py` |
 
-Each stub file contains the full architecture spec, the suggested layer layout,
-the target parameter count and the acceptance checks. Use
-`src/models/alexnet_cnn.py` as the worked example for conventions.
+Both must accept `[batch, 3, 160, 160]` and return `[batch, 15]` raw logits.
+Softmax remains outside the model because cross-entropy expects logits.
 
-VGG16 and VGG19 differ only in their layer configuration (13 vs 16 conv layers),
-which is what makes the pair a clean depth ablation.
-
-## Writing your model
-
-1. Fill in your file. It must accept `[B, 3, 160, 160]` and return `[B, 10]` raw
-   logits. No softmax inside the model - `CrossEntropyLoss` expects logits.
-2. Check the shape, parameter count and that gradients flow:
-   ```bash
-   .venv/bin/python -m src.summarize --check
-   ```
-   Stay inside the agreed 0.5M-5M parameter budget and record your exact count.
-3. Prove the wiring works before burning hours on a real run:
-   ```bash
-   .venv/bin/python scripts/overfit_test.py --model residual
-   ```
-   It must reach ~100% training accuracy on 64 images. If it cannot, you have a
-   bug - the script prints the list of usual suspects.
-4. Train and evaluate:
-   ```bash
-   .venv/bin/python -m src.train --config configs/residual.yaml
-   .venv/bin/python -m src.evaluate --run runs/residual/<run_id>
-   ```
-
-To reproduce the tuned deep V2 experiment with the shared repository trainer:
-
-```bash
-.venv/bin/python -m src.train --config configs/justin_deep_v2.yaml
-```
-
-Alternatively, open `notebooks/IP102_Justin_Deep_CNN.ipynb` and run it from the
-repository root or from the `notebooks/` directory. It writes to
-`runs/justin_deep_cnn_v2/`.
-
-Roughly 20-25 s per epoch for the baseline on an M3 (4,318 images, batch 32), so
-a full 60-epoch run is about 20-30 minutes. Deeper models take proportionally
-longer.
+Other model files in `src/models/` are team experiments or historical stubs;
+they are not part of this two-model Broad15 rerun unless the team explicitly
+adds them to the experiment plan.
 
 ## Run artifacts
 
-Every run writes `runs/<model>/<run_id>/`:
+The command-line trainer writes a timestamped directory under `runs/broad15/`.
+The notebooks write to their named directories in the same Broad15 folder.
+Typical artifacts include `best_model.pt`, `last_checkpoint.pt`,
+`training_history.csv`, `train_summary.json`, learning curves, split-specific
+confusion matrices, result JSON, and prediction CSV files. `runs/` is ignored by
+Git, so back up important final artifacts separately.
 
-```
-config.yaml             the exact config used - the run is reproducible from this
-best_model.pt           checkpoint at the best validation macro F1
-training_history.csv    per-epoch losses and metrics, written as it goes
-loss_curve.png          train vs validation loss
-metric_curve.png        validation accuracy and macro F1
-results.json            test metrics, params, size, CPU latency
-confusion_matrix.png    counts, shaded by row fraction
-predictions.csv         per-image prediction with filenames and class names
-```
+## Unified model-development evidence
 
-`predictions.csv` is what you use for the required error analysis - filter on
-`correct == 0` and inspect at least ten failures.
-
-## Final comparison
-
-```bash
-.venv/bin/python -m src.summarize --compare
-```
-
-Collects every `results.json` into the comparison table. Macro F1 is the primary
-metric, but pick the final model on application suitability: it runs offline, so
-CPU latency and file size matter too.
-
-## Layout
-
-```
-configs/          _base.yaml holds the locked protocol; model YAMLs extend it
-benchmarks/       optional pretrained benchmarks, for comparison only
-data_manifests/   generated CSVs (git-ignored) + selected_classes.json
-docs/             reference documents
-notebooks/        active experiment notebooks plus superseded copies in archive/
-scripts/          setup_data, compute_norm_stats, check_data, overfit_test,
-                  make_smoke_manifests; legacy/ preserves the old V2 runner
-src/data/         dataset.py, transforms.py
-src/models/       one file per architecture + the build_model registry
-src/utils/        seed, device, metrics, plots
-src/              train.py, evaluate.py, predict.py, summarize.py, config.py
-runs/             checkpoints and results (git-ignored)
-```
+The complete evidence file preserves the historical Rice10 experiments while
+clearly separating them from the active Broad15 dataset, controlled comparison,
+warm-restart provenance, final validation/test metrics, and failure analysis:
+[`docs/MODEL_DEVELOPMENT_EVIDENCE.md`](docs/MODEL_DEVELOPMENT_EVIDENCE.md).

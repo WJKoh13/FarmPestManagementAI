@@ -1,4 +1,4 @@
-"""Shared PyTorch dataset for the ten-class IP102 rice-pest subset (Step 2).
+"""Shared PyTorch dataset for manifest-defined IP102 classification subsets.
 
 Every model in the project must load data through this class so that the only
 difference between experiments is the architecture.
@@ -20,7 +20,7 @@ class IP102ClassificationDataset(Dataset):
     """Reads a CSV manifest and yields (image, project_label[, path]).
 
     Args:
-        manifest_path: CSV written by ``scripts/setup_data.py``.
+        manifest_path: CSV written by a repository manifest-building script.
         dataset_root: Directory the manifest's ``image_path`` values are relative to,
             e.g. ``IP102_v1.1/Classification/ip102_v1.1``.
         transform: Torchvision transform applied to the PIL image.

@@ -1,0 +1,6 @@
+extends: _broad15_base.yaml
+
+model: justin_deep_v2
+model_kwargs:
+  classifier_dropout: 0.20
+  stage_dropouts: [0.00, 0.00, 0.05, 0.10]

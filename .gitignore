@@ -9,7 +9,7 @@ runs/
 *.pt
 *.pth
 
-# Generated manifests (regenerate with: python scripts/setup_data.py)
+# Generated manifests (regenerate with setup_data.py or build_subset_manifests.py)
 data_manifests/*.csv
 
 # Python

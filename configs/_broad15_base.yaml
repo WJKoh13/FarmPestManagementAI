@@ -1,0 +1,17 @@
+# Locked Broad15 training protocol. Baseline and Deep V2 must inherit this file
+# so their comparison changes the model rather than the data/training procedure.
+extends: _base.yaml
+
+train_manifest: data_manifests/broad15_train.csv
+val_manifest: data_manifests/broad15_validation.csv
+test_manifest: data_manifests/broad15_test.csv
+num_classes: 15
+output_root: runs/broad15
+
+epochs: 50
+learning_rate: 0.0005
+scheduler_patience: 3
+early_stopping_patience: 10
+norm_stats: configs/notebook_half_range_norm.json
+augmentation_profile: deep_v2
+eval_profile: stretch

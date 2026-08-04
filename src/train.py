@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import random
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import yaml
@@ -35,6 +37,7 @@ HISTORY_FIELDS = [
     "epoch",
     "train_loss",
     "train_accuracy",
+    "train_macro_f1",
     "val_loss",
     "val_accuracy",
     "val_macro_f1",
@@ -43,7 +46,12 @@ HISTORY_FIELDS = [
 ]
 
 
-def build_dataloaders(config: dict, mean, std) -> tuple[DataLoader, DataLoader, IP102ClassificationDataset]:
+def build_dataloaders(
+    config: dict,
+    mean,
+    std,
+    device: torch.device,
+) -> tuple[DataLoader, DataLoader, IP102ClassificationDataset, torch.Generator]:
     image_size = config["image_size"]
     dataset_root = resolve_path(config["dataset_root"])
 
@@ -75,10 +83,11 @@ def build_dataloaders(config: dict, mean, std) -> tuple[DataLoader, DataLoader, 
         "num_workers": config["num_workers"],
         "worker_init_fn": seed_worker,
         "persistent_workers": config["num_workers"] > 0,
+        "pin_memory": device.type != "cpu",
     }
     train_loader = DataLoader(train_set, shuffle=True, generator=generator, drop_last=False, **common)
     val_loader = DataLoader(val_set, shuffle=False, **common)
-    return train_loader, val_loader, train_set
+    return train_loader, val_loader, train_set, generator
 
 
 def compute_class_weights(train_set: IP102ClassificationDataset) -> torch.Tensor:
@@ -116,9 +125,19 @@ def evaluate_epoch(model, loader, criterion, device, num_classes: int) -> dict:
     return metrics
 
 
-def train_one_epoch(model, loader, criterion, optimizer, device, desc: str) -> tuple[float, float]:
+def train_one_epoch(
+    model,
+    loader,
+    criterion,
+    optimizer,
+    device,
+    num_classes: int,
+    desc: str,
+) -> dict:
     model.train()
-    running_loss, correct, seen = 0.0, 0, 0
+    running_loss, seen = 0.0, 0
+    all_true: list[int] = []
+    all_pred: list[int] = []
 
     # Progress bars are useless in a redirected log file, so switch them off there.
     for images, targets in tqdm(loader, desc=desc, leave=False, disable=not sys.stderr.isatty()):
@@ -132,10 +151,45 @@ def train_one_epoch(model, loader, criterion, optimizer, device, desc: str) -> t
         optimizer.step()
 
         running_loss += loss.item() * targets.size(0)
-        correct += (logits.argmax(dim=1) == targets).sum().item()
         seen += targets.size(0)
+        all_true.extend(targets.cpu().tolist())
+        all_pred.extend(logits.argmax(dim=1).detach().cpu().tolist())
 
-    return running_loss / max(seen, 1), correct / max(seen, 1)
+    metrics = compute_metrics(all_true, all_pred, num_classes)
+    metrics["loss"] = running_loss / max(seen, 1)
+    return metrics
+
+
+def atomic_torch_save(payload: dict, path: Path) -> None:
+    """Write a checkpoint without exposing a partially written target file."""
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    torch.save(payload, temporary_path)
+    temporary_path.replace(path)
+
+
+def capture_rng_state(generator: torch.Generator) -> dict:
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+        "dataloader_generator": generator.get_state(),
+    }
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        state["xpu"] = torch.xpu.get_rng_state_all()
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def restore_rng_state(state: dict, generator: torch.Generator) -> None:
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch"])
+    generator.set_state(state["dataloader_generator"])
+    if "xpu" in state and hasattr(torch, "xpu") and torch.xpu.is_available():
+        torch.xpu.set_rng_state_all(state["xpu"])
+    if "cuda" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda"])
 
 
 def main() -> None:
@@ -143,7 +197,12 @@ def main() -> None:
     parser.add_argument("--config", required=True, help="e.g. configs/alexnet.yaml")
     parser.add_argument("--run-id", default=None, help="Defaults to a UTC timestamp.")
     parser.add_argument("--epochs", type=int, default=None, help="Override epochs (smoke tests).")
-    parser.add_argument("--device", default=None, help="cpu | mps | cuda | auto")
+    parser.add_argument("--device", default=None, help="cpu | xpu | mps | cuda | auto")
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to a last_checkpoint.pt created by this trainer.",
+    )
     parser.add_argument("--num-workers", type=int, default=None)
     parser.add_argument("--train-manifest", default=None)
     parser.add_argument("--val-manifest", default=None)
@@ -167,12 +226,24 @@ def main() -> None:
     seed_everything(config["seed"])
     device = resolve_device(config["device"])
 
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = resolve_path(config["output_root"]) / config["model"] / run_id
+    resume_path = resolve_path(args.resume) if args.resume else None
+    if resume_path is not None and not resume_path.is_file():
+        raise FileNotFoundError(f"Resume checkpoint not found: {resume_path}")
+    if resume_path is not None and args.run_id is not None:
+        raise ValueError("Do not combine --resume with --run-id; the run directory comes from the checkpoint.")
+
+    run_id = resume_path.parent.name if resume_path else (
+        args.run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
+    )
+    run_dir = resume_path.parent if resume_path else (
+        resolve_path(config["output_root"]) / config["model"] / run_id
+    )
     run_dir.mkdir(parents=True, exist_ok=True)
 
     mean, std = load_norm_stats(resolve_path(config["norm_stats"]))
-    train_loader, val_loader, train_set = build_dataloaders(config, mean, std)
+    train_loader, val_loader, train_set, train_generator = build_dataloaders(
+        config, mean, std, device
+    )
     num_classes = config["num_classes"]
 
     if train_set.num_classes != num_classes:
@@ -202,9 +273,11 @@ def main() -> None:
     saved_config = {k: v for k, v in config.items() if not k.startswith("_")}
     saved_config["run_id"] = run_id
     saved_config["device_used"] = str(device)
-    (run_dir / "config.yaml").write_text(
-        yaml.safe_dump(saved_config, sort_keys=False), encoding="utf-8"
-    )
+    config_path = run_dir / "config.yaml"
+    if resume_path is None:
+        config_path.write_text(
+            yaml.safe_dump(saved_config, sort_keys=False), encoding="utf-8"
+        )
 
     print(f"model            : {config['model']}")
     print(f"parameters       : {total_params:,} total / {trainable_params:,} trainable")
@@ -215,30 +288,55 @@ def main() -> None:
 
     history: list[dict] = []
     history_path = run_dir / "training_history.csv"
-    with history_path.open("w", newline="", encoding="utf-8") as fh:
-        csv.DictWriter(fh, fieldnames=HISTORY_FIELDS).writeheader()
-
     best_f1 = -1.0
     best_epoch = -1
     epochs_without_improvement = 0
+    start_epoch = 1
 
-    for epoch in range(1, config["epochs"] + 1):
+    if resume_path is not None:
+        checkpoint = torch.load(resume_path, map_location=device, weights_only=False)
+        if checkpoint["model"] != config["model"]:
+            raise ValueError(
+                f"Checkpoint model {checkpoint['model']!r} does not match config model {config['model']!r}."
+            )
+        model.load_state_dict(checkpoint["state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        history = checkpoint["history"]
+        best_f1 = float(checkpoint["best_val_macro_f1"])
+        best_epoch = int(checkpoint["best_epoch"])
+        epochs_without_improvement = int(checkpoint["epochs_without_improvement"])
+        start_epoch = int(checkpoint["epoch"]) + 1
+        restore_rng_state(checkpoint["rng_state"], train_generator)
+        print(f"resuming         : epoch {start_epoch} from {resume_path}")
+
+    # Rebuild the CSV from checkpointed history so it remains consistent even
+    # if the process previously stopped between its CSV and checkpoint writes.
+    with history_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=HISTORY_FIELDS)
+        writer.writeheader()
+        writer.writerows(history)
+
+    for epoch in range(start_epoch, config["epochs"] + 1):
         started = time.perf_counter()
-        train_loss, train_acc = train_one_epoch(
+        train = train_one_epoch(
             model, train_loader, criterion, optimizer, device,
+            num_classes=num_classes,
             desc=f"epoch {epoch}/{config['epochs']}",
         )
         val = evaluate_epoch(model, val_loader, criterion, device, num_classes)
+        current_learning_rate = optimizer.param_groups[0]["lr"]
         scheduler.step(val["macro_f1"])
 
         row = {
             "epoch": epoch,
-            "train_loss": round(train_loss, 6),
-            "train_accuracy": round(train_acc, 6),
+            "train_loss": round(train["loss"], 6),
+            "train_accuracy": round(train["accuracy"], 6),
+            "train_macro_f1": round(train["macro_f1"], 6),
             "val_loss": round(val["loss"], 6),
             "val_accuracy": round(val["accuracy"], 6),
             "val_macro_f1": round(val["macro_f1"], 6),
-            "learning_rate": optimizer.param_groups[0]["lr"],
+            "learning_rate": current_learning_rate,
             "epoch_seconds": round(time.perf_counter() - started, 2),
         }
         history.append(row)
@@ -252,7 +350,7 @@ def main() -> None:
             best_epoch = epoch
             epochs_without_improvement = 0
             marker = "  <- best"
-            torch.save(
+            atomic_torch_save(
                 {
                     "model": config["model"],
                     "model_kwargs": config.get("model_kwargs", {}),
@@ -270,9 +368,31 @@ def main() -> None:
 
         print(
             f"epoch {epoch:3d}/{config['epochs']} | "
-            f"train loss {train_loss:.4f} acc {train_acc:.4f} | "
+            f"train loss {train['loss']:.4f} acc {train['accuracy']:.4f} "
+            f"macroF1 {train['macro_f1']:.4f} | "
             f"val loss {val['loss']:.4f} acc {val['accuracy']:.4f} "
             f"macroF1 {val['macro_f1']:.4f} | {row['epoch_seconds']:.1f}s{marker}"
+        )
+
+        atomic_torch_save(
+            {
+                "checkpoint_type": "last",
+                "model": config["model"],
+                "model_kwargs": config.get("model_kwargs", {}),
+                "num_classes": num_classes,
+                "state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "epoch": epoch,
+                "best_epoch": best_epoch,
+                "best_val_macro_f1": best_f1,
+                "epochs_without_improvement": epochs_without_improvement,
+                "history": history,
+                "class_names": train_set.class_names,
+                "seed": config["seed"],
+                "rng_state": capture_rng_state(train_generator),
+            },
+            run_dir / "last_checkpoint.pt",
         )
 
         if epochs_without_improvement >= config["early_stopping_patience"]:

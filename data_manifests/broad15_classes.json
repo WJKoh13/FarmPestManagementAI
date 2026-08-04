@@ -1,0 +1,30 @@
+{
+  "subset_name": "broad15_quality_v1",
+  "description": "Fifteen broad farm-pest categories selected using classification support, detection-annotation coverage, technical image resolution, and bounding-box visibility proxies.",
+  "dataset_root": "IP102_v1.1/Classification/ip102_v1.1",
+  "classes_file": "IP102_v1.1/Classification/classes.txt",
+  "manifest_prefix": "broad15",
+  "num_classes": 15,
+  "classes": [
+    {"project_label": 0, "original_label": 14, "class_name": "grub"},
+    {"project_label": 1, "original_label": 15, "class_name": "mole_cricket"},
+    {"project_label": 2, "original_label": 16, "class_name": "wireworm"},
+    {"project_label": 3, "original_label": 18, "class_name": "black_cutworm"},
+    {"project_label": 4, "original_label": 22, "class_name": "corn_borer"},
+    {"project_label": 5, "original_label": 23, "class_name": "army_worm"},
+    {"project_label": 6, "original_label": 24, "class_name": "aphids"},
+    {"project_label": 7, "original_label": 37, "class_name": "flea_beetle"},
+    {"project_label": 8, "original_label": 45, "class_name": "flax_budworm"},
+    {"project_label": 9, "original_label": 47, "class_name": "tarnished_plant_bug"},
+    {"project_label": 10, "original_label": 51, "class_name": "blister_beetle"},
+    {"project_label": 11, "original_label": 69, "class_name": "cicadella_viridis"},
+    {"project_label": 12, "original_label": 70, "class_name": "miridae"},
+    {"project_label": 13, "original_label": 86, "class_name": "prodenia_litura"},
+    {"project_label": 14, "original_label": 101, "class_name": "cicadellidae"}
+  ],
+  "expected_totals": {
+    "train": 17448,
+    "validation": 2906,
+    "test": 8735
+  }
+}

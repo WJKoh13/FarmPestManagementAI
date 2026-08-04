@@ -76,9 +76,20 @@ def main() -> None:
     parser.add_argument("--run", required=True, help="Run directory containing best_model.pt")
     parser.add_argument("--split", default="test", choices=["test", "validation"])
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow replacing existing artifacts for this split.",
+    )
     args = parser.parse_args()
 
     run_dir = resolve_path(args.run)
+    results_path = run_dir / f"{args.split}_results.json"
+    if results_path.exists() and not args.force:
+        raise FileExistsError(
+            f"{results_path} already exists. Refusing to repeat {args.split} evaluation; "
+            "pass --force only when replacement is intentional."
+        )
     config = load_config(run_dir / "config.yaml", {"device": args.device})
     device = resolve_device(config["device"])
 
@@ -115,7 +126,7 @@ def main() -> None:
     latency_ms = measure_cpu_latency(model, image_size=config["image_size"])
 
     # predictions.csv - filenames and readable class names, for error analysis.
-    predictions_path = run_dir / "predictions.csv"
+    predictions_path = run_dir / f"{args.split}_predictions.csv"
     with predictions_path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(
@@ -128,7 +139,11 @@ def main() -> None:
                  round(conf, 4), int(true == pred)]
             )
 
-    plot_confusion_matrix(metrics["confusion_matrix"], class_names, run_dir / "confusion_matrix.png")
+    plot_confusion_matrix(
+        metrics["confusion_matrix"],
+        class_names,
+        run_dir / f"{args.split}_confusion_matrix.png",
+    )
 
     per_class = {
         class_names[i]: {
@@ -148,7 +163,7 @@ def main() -> None:
         "best_epoch": checkpoint.get("epoch", -1),
         "best_val_macro_f1": round(float(checkpoint.get("val_macro_f1", 0.0)), 6),
         "split": args.split,
-        "test_accuracy": round(metrics["accuracy"], 6),
+        "accuracy": round(metrics["accuracy"], 6),
         "macro_precision": round(metrics["macro_precision"], 6),
         "macro_recall": round(metrics["macro_recall"], 6),
         "macro_f1": round(metrics["macro_f1"], 6),
@@ -158,7 +173,7 @@ def main() -> None:
         "confusion_matrix": metrics["confusion_matrix"],
         "class_names": class_names,
     }
-    (run_dir / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+    results_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
 
     print(f"\n{'class':<32}{'prec':>8}{'recall':>8}{'f1':>8}{'n':>7}")
     print("-" * 63)
@@ -168,7 +183,7 @@ def main() -> None:
             f"{scores['f1']:>8.4f}{scores['support']:>7d}"
         )
     print("-" * 63)
-    print(f"accuracy         : {results['test_accuracy']:.4f}")
+    print(f"accuracy         : {results['accuracy']:.4f}")
     print(f"macro precision  : {results['macro_precision']:.4f}")
     print(f"macro recall     : {results['macro_recall']:.4f}")
     print(f"macro F1         : {results['macro_f1']:.4f}   <- primary metric")
