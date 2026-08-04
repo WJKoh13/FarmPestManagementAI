@@ -1,0 +1,826 @@
+{
+  "subset": "full102",
+  "source": "classification",
+  "class_mapping_version": "1.0.0",
+  "description": "Class names for scope 'full102', rendered by scripts/build_app_classes.py from ip102_v1.1/Classification/classes.txt. class_name is the slug used as the treatment-guide key; display_name is what the farmer sees. original_label is the 0-based IP102 label, project_label is this scope's own 0-based label. Slugs for labels also present in classes_top15.json are copied from that file so both scopes resolve to the same treatment guide.",
+  "num_classes": 102,
+  "classes_with_treatment_guide": 15,
+  "classes": [
+    {
+      "project_label": 0,
+      "original_label": 0,
+      "class_name": "rice_leaf_roller",
+      "display_name": "Rice leaf roller",
+      "ip102_name": "rice leaf roller",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 1,
+      "original_label": 1,
+      "class_name": "rice_leaf_caterpillar",
+      "display_name": "Rice leaf caterpillar",
+      "ip102_name": "rice leaf caterpillar",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 2,
+      "original_label": 2,
+      "class_name": "paddy_stem_maggot",
+      "display_name": "Paddy stem maggot",
+      "ip102_name": "paddy stem maggot",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 3,
+      "original_label": 3,
+      "class_name": "asiatic_rice_borer",
+      "display_name": "Asiatic rice borer",
+      "ip102_name": "asiatic rice borer",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 4,
+      "original_label": 4,
+      "class_name": "yellow_rice_borer",
+      "display_name": "Yellow rice borer",
+      "ip102_name": "yellow rice borer",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 5,
+      "original_label": 5,
+      "class_name": "rice_gall_midge",
+      "display_name": "Rice gall midge",
+      "ip102_name": "rice gall midge",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 6,
+      "original_label": 6,
+      "class_name": "rice_stemfly",
+      "display_name": "Rice Stemfly",
+      "ip102_name": "Rice Stemfly",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 7,
+      "original_label": 7,
+      "class_name": "brown_plant_hopper",
+      "display_name": "Brown plant hopper",
+      "ip102_name": "brown plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 8,
+      "original_label": 8,
+      "class_name": "white_backed_plant_hopper",
+      "display_name": "White backed plant hopper",
+      "ip102_name": "white backed plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 9,
+      "original_label": 9,
+      "class_name": "small_brown_plant_hopper",
+      "display_name": "Small brown plant hopper",
+      "ip102_name": "small brown plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 10,
+      "original_label": 10,
+      "class_name": "rice_water_weevil",
+      "display_name": "Rice water weevil",
+      "ip102_name": "rice water weevil",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 11,
+      "original_label": 11,
+      "class_name": "rice_leafhopper",
+      "display_name": "Rice leafhopper",
+      "ip102_name": "rice leafhopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 12,
+      "original_label": 12,
+      "class_name": "grain_spreader_thrips",
+      "display_name": "Grain spreader thrips",
+      "ip102_name": "grain spreader thrips",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 13,
+      "original_label": 13,
+      "class_name": "rice_shell_pest",
+      "display_name": "Rice shell pest",
+      "ip102_name": "rice shell pest",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 14,
+      "original_label": 14,
+      "class_name": "grub",
+      "display_name": "Grub",
+      "ip102_name": "grub",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 15,
+      "original_label": 15,
+      "class_name": "mole_cricket",
+      "display_name": "Mole cricket",
+      "ip102_name": "mole cricket",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 16,
+      "original_label": 16,
+      "class_name": "wireworm",
+      "display_name": "Wireworm",
+      "ip102_name": "wireworm",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 17,
+      "original_label": 17,
+      "class_name": "white_margined_moth",
+      "display_name": "White margined moth",
+      "ip102_name": "white margined moth",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 18,
+      "original_label": 18,
+      "class_name": "black_cutworm",
+      "display_name": "Black cutworm",
+      "ip102_name": "black cutworm",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 19,
+      "original_label": 19,
+      "class_name": "large_cutworm",
+      "display_name": "Large cutworm",
+      "ip102_name": "large cutworm",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 20,
+      "original_label": 20,
+      "class_name": "yellow_cutworm",
+      "display_name": "Yellow cutworm",
+      "ip102_name": "yellow cutworm",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 21,
+      "original_label": 21,
+      "class_name": "red_spider",
+      "display_name": "Red spider",
+      "ip102_name": "red spider",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 22,
+      "original_label": 22,
+      "class_name": "corn_borer",
+      "display_name": "Corn borer",
+      "ip102_name": "corn borer",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 23,
+      "original_label": 23,
+      "class_name": "army_worm",
+      "display_name": "Army worm",
+      "ip102_name": "army worm",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 24,
+      "original_label": 24,
+      "class_name": "aphids",
+      "display_name": "Aphids",
+      "ip102_name": "aphids",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 25,
+      "original_label": 25,
+      "class_name": "potosiabre_vitarsis",
+      "display_name": "Potosiabre vitarsis",
+      "ip102_name": "Potosiabre vitarsis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 26,
+      "original_label": 26,
+      "class_name": "peach_borer",
+      "display_name": "Peach borer",
+      "ip102_name": "peach borer",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 27,
+      "original_label": 27,
+      "class_name": "english_grain_aphid",
+      "display_name": "English grain aphid",
+      "ip102_name": "english grain aphid",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 28,
+      "original_label": 28,
+      "class_name": "green_bug",
+      "display_name": "Green bug",
+      "ip102_name": "green bug",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 29,
+      "original_label": 29,
+      "class_name": "bird_cherry_oataphid",
+      "display_name": "Bird cherry-oataphid",
+      "ip102_name": "bird cherry-oataphid",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 30,
+      "original_label": 30,
+      "class_name": "wheat_blossom_midge",
+      "display_name": "Wheat blossom midge",
+      "ip102_name": "wheat blossom midge",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 31,
+      "original_label": 31,
+      "class_name": "penthaleus_major",
+      "display_name": "Penthaleus major",
+      "ip102_name": "penthaleus major",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 32,
+      "original_label": 32,
+      "class_name": "longlegged_spider_mite",
+      "display_name": "Longlegged spider mite",
+      "ip102_name": "longlegged spider mite",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 33,
+      "original_label": 33,
+      "class_name": "wheat_phloeothrips",
+      "display_name": "Wheat phloeothrips",
+      "ip102_name": "wheat phloeothrips",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 34,
+      "original_label": 34,
+      "class_name": "wheat_sawfly",
+      "display_name": "Wheat sawfly",
+      "ip102_name": "wheat sawfly",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 35,
+      "original_label": 35,
+      "class_name": "cerodonta_denticornis",
+      "display_name": "Cerodonta denticornis",
+      "ip102_name": "cerodonta denticornis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 36,
+      "original_label": 36,
+      "class_name": "beet_fly",
+      "display_name": "Beet fly",
+      "ip102_name": "beet fly",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 37,
+      "original_label": 37,
+      "class_name": "flea_beetle",
+      "display_name": "Flea beetle",
+      "ip102_name": "flea beetle",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 38,
+      "original_label": 38,
+      "class_name": "cabbage_army_worm",
+      "display_name": "Cabbage army worm",
+      "ip102_name": "cabbage army worm",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 39,
+      "original_label": 39,
+      "class_name": "beet_army_worm",
+      "display_name": "Beet army worm",
+      "ip102_name": "beet army worm",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 40,
+      "original_label": 40,
+      "class_name": "beet_spot_flies",
+      "display_name": "Beet spot flies",
+      "ip102_name": "Beet spot flies",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 41,
+      "original_label": 41,
+      "class_name": "meadow_moth",
+      "display_name": "Meadow moth",
+      "ip102_name": "meadow moth",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 42,
+      "original_label": 42,
+      "class_name": "beet_weevil",
+      "display_name": "Beet weevil",
+      "ip102_name": "beet weevil",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 43,
+      "original_label": 43,
+      "class_name": "sericaorient_alismots_chulsky",
+      "display_name": "Sericaorient alismots chulsky",
+      "ip102_name": "sericaorient alismots chulsky",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 44,
+      "original_label": 44,
+      "class_name": "alfalfa_weevil",
+      "display_name": "Alfalfa weevil",
+      "ip102_name": "alfalfa weevil",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 45,
+      "original_label": 45,
+      "class_name": "flax_budworm",
+      "display_name": "Flax budworm",
+      "ip102_name": "flax budworm",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 46,
+      "original_label": 46,
+      "class_name": "alfalfa_plant_bug",
+      "display_name": "Alfalfa plant bug",
+      "ip102_name": "alfalfa plant bug",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 47,
+      "original_label": 47,
+      "class_name": "tarnished_plant_bug",
+      "display_name": "Tarnished plant bug",
+      "ip102_name": "tarnished plant bug",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 48,
+      "original_label": 48,
+      "class_name": "locustoidea",
+      "display_name": "Locustoidea",
+      "ip102_name": "Locustoidea",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 49,
+      "original_label": 49,
+      "class_name": "lytta_polita",
+      "display_name": "Lytta polita",
+      "ip102_name": "lytta polita",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 50,
+      "original_label": 50,
+      "class_name": "legume_blister_beetle",
+      "display_name": "Legume blister beetle",
+      "ip102_name": "legume blister beetle",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 51,
+      "original_label": 51,
+      "class_name": "blister_beetle",
+      "display_name": "Blister beetle",
+      "ip102_name": "blister beetle",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 52,
+      "original_label": 52,
+      "class_name": "therioaphis_maculata_buckton",
+      "display_name": "Therioaphis maculata Buckton",
+      "ip102_name": "therioaphis maculata Buckton",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 53,
+      "original_label": 53,
+      "class_name": "odontothrips_loti",
+      "display_name": "Odontothrips loti",
+      "ip102_name": "odontothrips loti",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 54,
+      "original_label": 54,
+      "class_name": "thrips",
+      "display_name": "Thrips",
+      "ip102_name": "Thrips",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 55,
+      "original_label": 55,
+      "class_name": "alfalfa_seed_chalcid",
+      "display_name": "Alfalfa seed chalcid",
+      "ip102_name": "alfalfa seed chalcid",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 56,
+      "original_label": 56,
+      "class_name": "pieris_canidia",
+      "display_name": "Pieris canidia",
+      "ip102_name": "Pieris canidia",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 57,
+      "original_label": 57,
+      "class_name": "apolygus_lucorum",
+      "display_name": "Apolygus lucorum",
+      "ip102_name": "Apolygus lucorum",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 58,
+      "original_label": 58,
+      "class_name": "limacodidae",
+      "display_name": "Limacodidae",
+      "ip102_name": "Limacodidae",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 59,
+      "original_label": 59,
+      "class_name": "viteus_vitifoliae",
+      "display_name": "Viteus vitifoliae",
+      "ip102_name": "Viteus vitifoliae",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 60,
+      "original_label": 60,
+      "class_name": "colomerus_vitis",
+      "display_name": "Colomerus vitis",
+      "ip102_name": "Colomerus vitis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 61,
+      "original_label": 61,
+      "class_name": "brevipoalpus_lewisi_mcgregor",
+      "display_name": "Brevipoalpus lewisi McGregor",
+      "ip102_name": "Brevipoalpus lewisi McGregor",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 62,
+      "original_label": 62,
+      "class_name": "oides_decempunctata",
+      "display_name": "Oides decempunctata",
+      "ip102_name": "oides decempunctata",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 63,
+      "original_label": 63,
+      "class_name": "polyphagotars_onemus_latus",
+      "display_name": "Polyphagotars onemus latus",
+      "ip102_name": "Polyphagotars onemus latus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 64,
+      "original_label": 64,
+      "class_name": "pseudococcus_comstocki_kuwana",
+      "display_name": "Pseudococcus comstocki Kuwana",
+      "ip102_name": "Pseudococcus comstocki Kuwana",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 65,
+      "original_label": 65,
+      "class_name": "parathrene_regalis",
+      "display_name": "Parathrene regalis",
+      "ip102_name": "parathrene regalis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 66,
+      "original_label": 66,
+      "class_name": "ampelophaga",
+      "display_name": "Ampelophaga",
+      "ip102_name": "Ampelophaga",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 67,
+      "original_label": 67,
+      "class_name": "lycorma_delicatula",
+      "display_name": "Lycorma delicatula",
+      "ip102_name": "Lycorma delicatula",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 68,
+      "original_label": 68,
+      "class_name": "xylotrechus",
+      "display_name": "Xylotrechus",
+      "ip102_name": "Xylotrechus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 69,
+      "original_label": 69,
+      "class_name": "cicadella_viridis",
+      "display_name": "Cicadella viridis",
+      "ip102_name": "Cicadella viridis",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 70,
+      "original_label": 70,
+      "class_name": "miridae",
+      "display_name": "Miridae",
+      "ip102_name": "Miridae",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 71,
+      "original_label": 71,
+      "class_name": "trialeurodes_vaporariorum",
+      "display_name": "Trialeurodes vaporariorum",
+      "ip102_name": "Trialeurodes vaporariorum",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 72,
+      "original_label": 72,
+      "class_name": "erythroneura_apicalis",
+      "display_name": "Erythroneura apicalis",
+      "ip102_name": "Erythroneura apicalis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 73,
+      "original_label": 73,
+      "class_name": "papilio_xuthus",
+      "display_name": "Papilio xuthus",
+      "ip102_name": "Papilio xuthus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 74,
+      "original_label": 74,
+      "class_name": "panonchus_citri_mcgregor",
+      "display_name": "Panonchus citri McGregor",
+      "ip102_name": "Panonchus citri McGregor",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 75,
+      "original_label": 75,
+      "class_name": "phyllocoptes_oleiverus_ashmead",
+      "display_name": "Phyllocoptes oleiverus ashmead",
+      "ip102_name": "Phyllocoptes oleiverus ashmead",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 76,
+      "original_label": 76,
+      "class_name": "icerya_purchasi_maskell",
+      "display_name": "Icerya purchasi Maskell",
+      "ip102_name": "Icerya purchasi Maskell",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 77,
+      "original_label": 77,
+      "class_name": "unaspis_yanonensis",
+      "display_name": "Unaspis yanonensis",
+      "ip102_name": "Unaspis yanonensis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 78,
+      "original_label": 78,
+      "class_name": "ceroplastes_rubens",
+      "display_name": "Ceroplastes rubens",
+      "ip102_name": "Ceroplastes rubens",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 79,
+      "original_label": 79,
+      "class_name": "chrysomphalus_aonidum",
+      "display_name": "Chrysomphalus aonidum",
+      "ip102_name": "Chrysomphalus aonidum",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 80,
+      "original_label": 80,
+      "class_name": "parlatoria_zizyphus_lucus",
+      "display_name": "Parlatoria zizyphus Lucus",
+      "ip102_name": "Parlatoria zizyphus Lucus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 81,
+      "original_label": 81,
+      "class_name": "nipaecoccus_vastalor",
+      "display_name": "Nipaecoccus vastalor",
+      "ip102_name": "Nipaecoccus vastalor",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 82,
+      "original_label": 82,
+      "class_name": "aleurocanthus_spiniferus",
+      "display_name": "Aleurocanthus spiniferus",
+      "ip102_name": "Aleurocanthus spiniferus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 83,
+      "original_label": 83,
+      "class_name": "tetradacus_c_bactrocera_minax",
+      "display_name": "Tetradacus c Bactrocera minax",
+      "ip102_name": "Tetradacus c Bactrocera minax",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 84,
+      "original_label": 84,
+      "class_name": "dacus_dorsalis_hendel",
+      "display_name": "Dacus dorsalis(Hendel)",
+      "ip102_name": "Dacus dorsalis(Hendel)",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 85,
+      "original_label": 85,
+      "class_name": "bactrocera_tsuneonis",
+      "display_name": "Bactrocera tsuneonis",
+      "ip102_name": "Bactrocera tsuneonis",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 86,
+      "original_label": 86,
+      "class_name": "prodenia_litura",
+      "display_name": "Prodenia litura",
+      "ip102_name": "Prodenia litura",
+      "has_treatment_guide": true
+    },
+    {
+      "project_label": 87,
+      "original_label": 87,
+      "class_name": "adristyrannus",
+      "display_name": "Adristyrannus",
+      "ip102_name": "Adristyrannus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 88,
+      "original_label": 88,
+      "class_name": "phyllocnistis_citrella_stainton",
+      "display_name": "Phyllocnistis citrella Stainton",
+      "ip102_name": "Phyllocnistis citrella Stainton",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 89,
+      "original_label": 89,
+      "class_name": "toxoptera_citricidus",
+      "display_name": "Toxoptera citricidus",
+      "ip102_name": "Toxoptera citricidus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 90,
+      "original_label": 90,
+      "class_name": "toxoptera_aurantii",
+      "display_name": "Toxoptera aurantii",
+      "ip102_name": "Toxoptera aurantii",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 91,
+      "original_label": 91,
+      "class_name": "aphis_citricola_vander_goot",
+      "display_name": "Aphis citricola Vander Goot",
+      "ip102_name": "Aphis citricola Vander Goot",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 92,
+      "original_label": 92,
+      "class_name": "scirtothrips_dorsalis_hood",
+      "display_name": "Scirtothrips dorsalis Hood",
+      "ip102_name": "Scirtothrips dorsalis Hood",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 93,
+      "original_label": 93,
+      "class_name": "dasineura_sp",
+      "display_name": "Dasineura sp",
+      "ip102_name": "Dasineura sp",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 94,
+      "original_label": 94,
+      "class_name": "lawana_imitata_melichar",
+      "display_name": "Lawana imitata Melichar",
+      "ip102_name": "Lawana imitata Melichar",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 95,
+      "original_label": 95,
+      "class_name": "salurnis_marginella_guerr",
+      "display_name": "Salurnis marginella Guerr",
+      "ip102_name": "Salurnis marginella Guerr",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 96,
+      "original_label": 96,
+      "class_name": "deporaus_marginatus_pascoe",
+      "display_name": "Deporaus marginatus Pascoe",
+      "ip102_name": "Deporaus marginatus Pascoe",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 97,
+      "original_label": 97,
+      "class_name": "chlumetia_transversa",
+      "display_name": "Chlumetia transversa",
+      "ip102_name": "Chlumetia transversa",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 98,
+      "original_label": 98,
+      "class_name": "mango_flat_beak_leafhopper",
+      "display_name": "Mango flat beak leafhopper",
+      "ip102_name": "Mango flat beak leafhopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 99,
+      "original_label": 99,
+      "class_name": "rhytidodera_bowrinii_white",
+      "display_name": "Rhytidodera bowrinii white",
+      "ip102_name": "Rhytidodera bowrinii white",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 100,
+      "original_label": 100,
+      "class_name": "sternochetus_frigidus",
+      "display_name": "Sternochetus frigidus",
+      "ip102_name": "Sternochetus frigidus",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 101,
+      "original_label": 101,
+      "class_name": "cicadellidae",
+      "display_name": "Cicadellidae",
+      "ip102_name": "Cicadellidae",
+      "has_treatment_guide": true
+    }
+  ]
+}

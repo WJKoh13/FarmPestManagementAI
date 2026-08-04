@@ -251,53 +251,109 @@ tests/                pytest suite — architecture, checkpoint, assistant
 archive/              superseded rice-10 handoff notes and benchmark script
 ```
 
-## The chatbot
+## The app
 
 `app/` is the farmer-facing side: upload a photo, get an identification and
-organic treatment guidance, fully offline. It serves **ProPestNet**, the model
-documented in `docs/propestnet.md`, at its own preprocessing (128px, ImageNet
-normalization) rather than the harness defaults — the app reads those settings
-from the checkpoint, so the two can never drift apart silently.
+organic treatment guidance, fully offline. **`docs/architecture.md` explains the
+whole thing in plain language** and is the place to start.
+
+Three components, three processes' worth of separation:
+
+| | | |
+|---|---|---|
+| **Front end** | `app/streamlit_app.py` | The screen. Holds no model and makes no decisions. |
+| **Back end** | `app/main.py` | FastAPI. Runs the agent, owns the photo store, keeps no session. |
+| **AI engine** | ProPestNet + qwen2.5:3b + `docs/knowledge/` | Everything that knows something. |
 
 ```bash
-.venv/bin/python -m streamlit run app/streamlit_app.py    # chat UI
-.venv/bin/python -m uvicorn app.main:app --port 8000      # /analyze, /chat, /health
+.venv/bin/python scripts/run_app.py     # starts both, waits for the backend, opens :8501
 ```
 
-The app loads the highest-scoring run from `runs/`. To make a trained ProPestNet
-checkpoint available to it, see `scripts/import_propestnet_run.py --help`. With
-no usable checkpoint the app says so in a banner rather than serving noise.
+Or separately:
+
+```bash
+.venv/bin/python -m uvicorn app.main:app --port 8000
+.venv/bin/python -m streamlit run app/streamlit_app.py
+```
+
+It serves **ProPestNet** (`docs/propestnet.md`) at its own preprocessing — 128px,
+ImageNet normalization — read from the checkpoint, so the two cannot drift apart
+silently. The app loads the highest-scoring run in `runs/`; see
+`scripts/import_propestnet_run.py --help` to add one. With no usable checkpoint
+it says so in a banner rather than serving noise.
+
+### Function calling
+
+The language model decides for itself when to run the CNN. It is given three
+tools and picks:
+
+| Tool | Returns |
+|---|---|
+| `classify_pest_image` | The CNN's verdict on an attached photo |
+| `lookup_treatment_guide` | The vetted guide — the only source of a product or dose |
+| `search_knowledge_base` | Background passages from the reference library |
+
+No branch in the code decides to classify. The message merely says a photo exists
+and where; the model asks for the classifier. The tool trace above each answer
+shows what it chose, and marks anything the app added rather than the model.
+
+`app/agent.py` runs the loop, `app/agent_tools.py` holds the schemas and their
+implementations side by side, and the model never receives a confidence number —
+the certainty decision is made in Python against `CONFIDENCE_FLOOR`.
+
+To watch it without a browser:
+
+```bash
+.venv/bin/python scripts/try_agent.py --image sample_images/aphids__IP025000243.jpg "on my kale"
+```
 
 ### The language model
 
-The conversation runs on a **local** model through Ollama. It is optional, and
-the app tells you in the sidebar whether it found one:
+Local, through Ollama, and it must support tool calling:
 
 ```bash
 brew install ollama && ollama serve
-ollama pull phi3            # or llama3.2:3b / qwen2.5:3b, then export OLLAMA_MODEL
+ollama pull qwen2.5:3b        # primary, sub-3B, instruction-tuned
+ollama pull qwen2.5:1.5b      # faster fallback, used automatically if 3b is absent
+ollama pull nomic-embed-text  # embeddings for the reference library
 ```
 
-Without it the assistant still identifies pests and still answers, straight from
-the guides in `app/treatment_guides.py` — the classifier and the written advice
-are the product; the language model only rephrases them around the farmer's own
-question. Nothing leaves the machine either way.
+Without it the app still identifies pests and still answers, from the guides in
+`app/treatment_guides.py`. Nothing leaves the machine either way.
+`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_EMBED_MODEL`, `OLLAMA_KEEP_ALIVE` and
+`OLLAMA_TIMEOUT` override the defaults; `PEST_API_URL` points the front end at
+the back end.
 
-`OLLAMA_BASE_URL`, `OLLAMA_MODEL` and `OLLAMA_TIMEOUT` override the defaults.
+### The reference library (RAG)
+
+`docs/knowledge/` is markdown prose about organic pest management — how the
+inputs work, how to scout, how to read damage. `scripts/build_knowledge_index.py`
+chunks it by heading, embeds each passage with `nomic-embed-text`, and writes
+`data_manifests/knowledge_index.json`, which is committed so a bare clone has
+working search with no Ollama and no build step.
+
+Retrieval is cosine similarity over normalised vectors — one dot product, no
+vector database, because forty passages do not need one. If the embedding model
+is missing it falls back to keyword scoring.
+
+**The library never states a dose or an interval.** Those live only in
+`treatment_guides.py`, which is short and hand-checked;
+`tests/test_knowledge.py` greps the corpus and fails if one appears.
 
 ### Context
 
-Three things make it a conversation rather than a photo endpoint, all in
-`app/conversation.py`:
+Three things make it a conversation rather than a photo endpoint:
 
 - **History** — the last few turns go to the model, so follow-up questions work.
 - **The pest in hand** — `PestContext` records what the last photo was identified
   as, from the classifier's own top-1, so "how often do I spray it?" needs no
   second upload.
-- **Grounding** — `app/retrieval.py` scores the fifteen treatment guides against
-  the question and attaches the best ones to the system prompt, under an
-  instruction not to contradict them. Keyword scoring, not embeddings: fifteen
-  short documents do not need a vector index, and it keeps the app dependency-free.
+- **Grounding** — the model must fetch a guide before advising. If it tries to
+  answer without one, the app fetches it and marks the step as its own.
+
+A pest the classifier was *not* confident about is refused by the guide tool, so
+an uncertain guess can never be laundered into confident instructions — and the
+refusal survives into later turns.
 
 Conversations and their photos are saved under `.chats/` (git-ignored), so
 closing the laptop does not lose an identification.
