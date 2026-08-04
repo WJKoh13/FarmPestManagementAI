@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..scopes import CLASS_MAPPING_VERSION, ScopeSpec, resolve_scope
 from .manifests import SPLITS, ManifestError, ManifestRecord, read_derived_manifest
@@ -294,6 +294,15 @@ class PestImageDataset(_dataset_base()):  # type: ignore[misc]
         record = self._records[index]
         image = load_image(self._images_dir / record.filename)
         if self._transform is not None:
+            # A transform that declares `wants_filename` needs the record's
+            # provenance, not just its pixels - the detection crop transform
+            # looks its bounding box up by filename. Checking for the attribute
+            # keeps every existing transform's one-argument call unchanged.
+            if getattr(self._transform, "wants_filename", False):
+                filename_aware = cast(
+                    "Callable[[PILImage, str], Any]", self._transform
+                )
+                return filename_aware(image, record.filename), record.project_label
             return self._transform(image), record.project_label
         return image, record.project_label
 

@@ -5,7 +5,9 @@ else in the project may hard-code the number of classes or the class mapping:
 loaders, models, losses, metrics, checkpoints, API schemas and the frontend all
 derive them from here.
 
-Two scopes are supported:
+Four scopes are supported. The first two are classification scopes over
+``ip102_v1.1/Classification``; the last two are detection scopes over
+``ip102_v1.1/Detection``, added for the bounding-box cropping experiments.
 
 ``rice10``
     A ten-class rice-pest subset of IP102, used for rapid development and as a
@@ -15,6 +17,12 @@ Two scopes are supported:
 ``full102``
     The complete IP102 classification task. Project labels are identical to the
     original IP102 labels, 0-101.
+
+``det_top10`` / ``det_top15``
+    The ten and fifteen most frequent classes of the IP102 detection subset,
+    where every image carries a bounding box. These draw on a different image
+    population and a different label numbering from the classification scopes,
+    so their metrics are not comparable with ``rice10`` or ``full102``.
 
 The IP102 manifests use zero-based labels while ``classes.txt`` numbers classes
 from 1, so ``classes.txt`` line ``id`` describes IP102 label ``id - 1``. That
@@ -29,12 +37,16 @@ from typing import Final
 
 __all__ = [
     "CLASS_MAPPING_VERSION",
+    "DETECTION_SCOPES",
+    "DET_TOP10",
+    "DET_TOP15",
     "FULL102",
     "RICE10",
     "SCOPES",
     "DatasetScope",
     "ScopeSpec",
     "get_scope",
+    "is_detection_scope",
     "is_valid_scope",
     "num_classes_for",
     "resolve_scope",
@@ -152,10 +164,52 @@ FULL102: Final[ScopeSpec] = ScopeSpec(
     original_labels=tuple(range(IP102_NUM_CLASSES)),
 )
 
+#: The two detection-derived scopes below cover the IP102 *Detection* subset,
+#: which is a different population from the Classification splits used by
+#: ``rice10`` and ``full102``: fewer images, its own official train/val/test
+#: assignment, and every image annotated with a bounding box. They exist so the
+#: bounding-box cropping experiments (E4/E5) can derive ``num_classes`` through
+#: this module like every other scope.
+#:
+#: Their project labels come from ``splits_top10.json`` / ``splits_top15.json``,
+#: which already store a zero-based label per image. Those files are the
+#: authority for the mapping, so ``original_labels`` is the identity here and
+#: the label carried in the split file is used as-is. A detection project label
+#: is therefore **not** interchangeable with an IP102 classification label, and
+#: a ``det_top10`` result must never be pooled with a ``rice10`` one.
+DET_TOP10: Final[ScopeSpec] = ScopeSpec(
+    name="det_top10",
+    description="Ten most frequent IP102 detection classes (bounding-box subset)",
+    original_labels=tuple(range(10)),
+)
+
+DET_TOP15: Final[ScopeSpec] = ScopeSpec(
+    name="det_top15",
+    description="Fifteen most frequent IP102 detection classes (bounding-box subset)",
+    original_labels=tuple(range(15)),
+)
+
+#: Scopes whose records come from the Detection subset rather than from the
+#: Classification manifests. Consulted by the loader to pick the right builder.
+DETECTION_SCOPES: Final[frozenset[str]] = frozenset({DET_TOP10.name, DET_TOP15.name})
+
 SCOPES: Final[Mapping[str, ScopeSpec]] = {
     RICE10.name: RICE10,
     FULL102.name: FULL102,
+    DET_TOP10.name: DET_TOP10,
+    DET_TOP15.name: DET_TOP15,
 }
+
+
+def is_detection_scope(scope: str | ScopeSpec) -> bool:
+    """Return whether ``scope`` draws its records from the Detection subset.
+
+    Detection scopes read ``splits_top*.json`` under the Detection tree instead
+    of the derived Classification manifests, and their images all carry a
+    bounding box.
+    """
+    name = scope.name if isinstance(scope, ScopeSpec) else scope
+    return name in DETECTION_SCOPES
 
 for _spec in SCOPES.values():
     _spec.validate()

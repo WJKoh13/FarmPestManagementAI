@@ -34,7 +34,11 @@ EXPECTED_RICE10 = {
 
 
 def test_supported_scopes() -> None:
-    assert set(scope_names()) == {"rice10", "full102"}
+    # The two classification scopes, plus the two detection scopes added for the
+    # E4/E5 bounding-box cropping experiments. Detection scopes draw on a
+    # different image population and their own label numbering, so their results
+    # are never pooled with rice10 or full102.
+    assert set(scope_names()) == {"rice10", "full102", "det_top10", "det_top15"}
 
 
 def test_num_classes_are_derived() -> None:

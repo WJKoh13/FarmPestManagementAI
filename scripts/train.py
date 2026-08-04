@@ -52,6 +52,14 @@ import torch
 from farm_pest_ai.cli import base_parser, bootstrap
 from farm_pest_ai.config import Config
 from farm_pest_ai.data.dataset import DatasetError
+from farm_pest_ai.data.detection import (
+    DetectionDataError,
+    build_detection_records,
+    detection_root,
+    load_boxes,
+    partition_records,
+    scope_suffix,
+)
 from farm_pest_ai.data.loaders import LoaderBundle, LoaderError, build_loaders
 from farm_pest_ai.data.manifests import (
     ManifestError,
@@ -61,6 +69,7 @@ from farm_pest_ai.data.manifests import (
 )
 from farm_pest_ai.logging_config import get_logger
 from farm_pest_ai.reproducibility import environment_snapshot
+from farm_pest_ai.scopes import is_detection_scope
 from farm_pest_ai.vision.models import MODEL_NAMES, ModelError, count_parameters
 from farm_pest_ai.vision.training import (
     EpochResult,
@@ -105,11 +114,17 @@ def assert_no_test_split(bundle: LoaderBundle) -> None:
 
 
 def assert_full_splits(config: Config, bundle: LoaderBundle) -> dict[str, Any]:
-    """Confirm each split's dataset covers its entire derived manifest.
+    """Confirm each split's dataset covers its entire source manifest.
 
-    Counts are read back from the manifest on disk rather than from a
-    configured expectation, so this catches a truncated manifest, a filtered
-    dataset and a subset override alike.
+    Counts are read back from disk rather than from a configured expectation,
+    so this catches a truncated manifest, a filtered dataset and a subset
+    override alike.
+
+    Detection scopes are checked against ``splits_top*.json`` instead of a
+    derived CSV, since that file is their manifest. Their expected count is the
+    split size **minus** the images dropped for a missing or unusable box: those
+    are dropped identically from both arms of a pair, so the run still covers
+    every sample the experiment can legitimately use.
 
     Returns:
         Per-split record counts, for the run report.
@@ -118,6 +133,7 @@ def assert_full_splits(config: Config, bundle: LoaderBundle) -> dict[str, Any]:
         TrainingRunError: If any split is short of its manifest.
     """
     scope = config.dataset.scope
+    detection = is_detection_scope(scope)
     coverage: dict[str, Any] = {}
 
     for split in TRAINING_SPLITS:
@@ -127,14 +143,40 @@ def assert_full_splits(config: Config, bundle: LoaderBundle) -> dict[str, Any]:
                 f"the {split!r} split is missing from the bundle; a real run needs "
                 f"both {list(TRAINING_SPLITS)}"
             )
-        manifest_path = manifest_csv_path(config.paths.processed_dir, scope, split)
-        try:
-            records, _ = read_derived_manifest(config.paths.processed_dir, scope, split)
-        except ManifestError as exc:
-            raise TrainingRunError(
-                f"could not read the {split!r} manifest {manifest_path}: {exc}"
-            ) from exc
-        expected = len(records)
+
+        if detection:
+            manifest_path = (
+                detection_root(config.paths.dataset_root)
+                / f"splits_{scope_suffix(scope)}.json"
+            )
+            try:
+                records = build_detection_records(
+                    config.paths.dataset_root, scope, split
+                )
+                boxes, invalid = load_boxes(config.paths.dataset_root, scope)
+            except DetectionDataError as exc:
+                raise TrainingRunError(
+                    f"could not read the {split!r} detection split {manifest_path}: "
+                    f"{exc}"
+                ) from exc
+            partition = partition_records(records, boxes, invalid)
+            expected = len(partition.kept)
+            dropped: Any = len(partition.dropped)
+        else:
+            manifest_path = manifest_csv_path(
+                config.paths.processed_dir, scope, split
+            )
+            try:
+                records, _ = read_derived_manifest(
+                    config.paths.processed_dir, scope, split
+                )
+            except ManifestError as exc:
+                raise TrainingRunError(
+                    f"could not read the {split!r} manifest {manifest_path}: {exc}"
+                ) from exc
+            expected = len(records)
+            dropped = None
+
         actual = len(dataset)
         if actual != expected:
             raise TrainingRunError(
@@ -147,6 +189,8 @@ def assert_full_splits(config: Config, bundle: LoaderBundle) -> dict[str, Any]:
             "manifest": str(manifest_path),
             "batches": len(bundle.loaders[split]),
         }
+        if dropped is not None:
+            coverage[split]["dropped_for_box"] = dropped
     return coverage
 
 

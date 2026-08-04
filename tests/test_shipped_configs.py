@@ -28,6 +28,11 @@ STANDALONE = [
     "exp_rice10_e2_224.yaml",
     "exp_rice10_e3_crop08.yaml",
     "exp_full102_protocol_a.yaml",
+    "exp_detection_protocol.yaml",
+    "exp_det_top10_e4a_fullframe.yaml",
+    "exp_det_top10_e4b_crop15.yaml",
+    "exp_det_top15_e5a_fullframe.yaml",
+    "exp_det_top15_e5b_crop15.yaml",
     "app.yaml",
     "llm.yaml",
 ]

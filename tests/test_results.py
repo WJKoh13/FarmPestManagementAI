@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from farm_pest_ai.scopes import scope_names
 from farm_pest_ai.vision.results import (
     ResultsError,
     compare_runs,
@@ -458,8 +459,11 @@ def test_compare_runs_reports_both_figures() -> None:
         # trained *after* the fix, where the two values are the same number and
         # differ only in the last bit of a float sum.
         assert row["corrected_macro_f1"] >= row["reported_macro_f1"] - 1e-12
-        # Phase 8 adds full102 runs beside the rice10 ones, which is what the
-        # comment above anticipates. The invariant is that every discovered run
-        # carries a *known* scope — not that only one scope may ever exist.
-        # Metrics from the two scopes are never combined; see docs/EVALUATION.md.
-        assert row["scope"] in {"rice10", "full102"}
+        # Phase 8 adds full102 runs beside the rice10 ones, and the E4/E5 crop
+        # experiments add det_top10/det_top15. The invariant is that every
+        # discovered run carries a *known* scope — not that only one scope may
+        # ever exist — so this is checked against the scope registry rather than
+        # a hard-coded pair that has to be edited each time a scope is added.
+        # Metrics from different scopes are never combined; see
+        # docs/EVALUATION.md.
+        assert row["scope"] in set(scope_names())

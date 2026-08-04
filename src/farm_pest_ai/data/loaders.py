@@ -35,8 +35,17 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from ..reproducibility import derive_seed, worker_init_fn
-from ..scopes import CLASS_MAPPING_VERSION, ScopeSpec
+from ..scopes import CLASS_MAPPING_VERSION, ScopeSpec, is_detection_scope
 from .dataset import PestImageDataset, class_weights
+from .detection import (
+    DEFAULT_PADDING,
+    BoxCropTransform,
+    DetectionDataError,
+    build_detection_records,
+    detection_root,
+    load_boxes,
+    partition_records,
+)
 from .manifests import SPLITS
 from .transforms import (
     EVAL_SPLITS,
@@ -258,6 +267,11 @@ def build_dataset(
         ).validate()
 
     paths = config.paths
+    if is_detection_scope(config.dataset.scope):
+        return _build_detection_dataset(
+            config, split, resolved, verify_files=verify_files
+        )
+
     return PestImageDataset.from_manifest(
         paths.processed_dir,
         config.dataset.scope,
@@ -266,6 +280,78 @@ def build_dataset(
         transform=build_transform(resolved, split),
         manifest_version=config.dataset.manifest_version,
         verify_files=verify_files,
+    )
+
+
+def _build_detection_dataset(
+    config: Config,
+    split: str,
+    preprocessing: PreprocessingConfig,
+    *,
+    verify_files: bool = False,
+) -> PestImageDataset:
+    """Build one split of a detection scope, cropped or full-frame.
+
+    Both arms of a pair run through this function and differ in exactly one
+    configuration field, ``dataset.use_bbox_crop``. Everything else - the
+    records, their order, the labels, and the resize/augment/normalise pipeline
+    - is produced identically, which is what makes the comparison paired.
+
+    Records whose box is missing or unusable are dropped **regardless of the
+    arm**, so the full-frame control consumes the same samples as the crop arm
+    even though it never reads a box.
+
+    Raises:
+        LoaderError: If cropping is requested but boxes cannot be loaded, or if
+            the split ends up empty.
+    """
+    spec = config.dataset.scope
+    dataset_section = config.section("dataset")
+    use_crop = bool(dataset_section.get("use_bbox_crop", False))
+    padding = float(dataset_section.get("bbox_padding", DEFAULT_PADDING))
+
+    root = detection_root(config.paths.dataset_root)
+    images_dir = root / "JPEGImages"
+    try:
+        records = build_detection_records(config.paths.dataset_root, spec, split)
+        boxes, invalid = load_boxes(config.paths.dataset_root, spec)
+    except DetectionDataError as exc:
+        raise LoaderError(str(exc)) from exc
+
+    partition = partition_records(records, boxes, invalid)
+    if not partition.kept:
+        raise LoaderError(
+            f"{split}: no usable records for scope {spec.name!r}; every image was "
+            f"dropped for a missing or invalid box"
+        )
+
+    inner = build_transform(preprocessing, split)
+    transform: Any = inner
+    if use_crop:
+        try:
+            transform = BoxCropTransform(boxes, inner, padding=padding)
+        except DetectionDataError as exc:
+            raise LoaderError(str(exc)) from exc
+
+    metadata = {
+        "source": "detection",
+        "scope": spec.name,
+        "split": split,
+        "use_bbox_crop": use_crop,
+        "bbox_padding": padding if use_crop else None,
+        "records_before_box_filter": len(records),
+        "records_dropped_for_box": len(partition.dropped),
+        "dropped_filenames": list(partition.dropped_filenames),
+        "images_dir": str(images_dir),
+    }
+    return PestImageDataset(
+        partition.kept,
+        images_dir,
+        spec,
+        split,
+        transform=transform,
+        verify_files=verify_files,
+        manifest_metadata=metadata,
     )
 
 
