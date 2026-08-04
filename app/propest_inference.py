@@ -131,7 +131,9 @@ def predict_probabilities(model, image: Image.Image, views: dict, *, tta: bool =
 
 def predict_topk(model, image: Image.Image | str | Path, class_names: list[str], views: dict,
                  *, k: int = 3, tta: bool = True, device: str | torch.device = "cpu",
-                 box: list[float] | None = None, prior: list[float] | None = None,
+                 box: list[float] | None = None,
+                 crop_margin: float = DEFAULT_CROP_MARGIN,
+                 prior: list[float] | None = None,
                  tau: float = 0.0) -> list[tuple[str, float]]:
     """Top-k ``(class_name, probability)`` for one photo, most confident first.
 
@@ -150,10 +152,13 @@ def predict_topk(model, image: Image.Image | str | Path, class_names: list[str],
     else:
         image = image.convert("RGB")
 
-    image = crop_to_box(image, box)
+    # Crop once, with the margin the weights were trained on, then score once
+    # with the prior correction. Both matter and neither may be dropped: a
+    # second crop would cut context out of an already-cropped image, and a
+    # second scoring pass without `prior`/`tau` would silently discard the
+    # logit adjustment the checkpoint asked for.
+    image = crop_to_box(image, box, margin=crop_margin)
     probabilities = predict_probabilities(model, image, views, tta=tta, device=device,
                                           prior=prior, tau=tau)
-    image = crop_to_box(image, box, margin=crop_margin)
-    probabilities = predict_probabilities(model, image, views, tta=tta, device=device)
     confidences, indices = probabilities.topk(min(k, len(class_names)))
     return [(class_names[i], float(c)) for c, i in zip(confidences, indices)]

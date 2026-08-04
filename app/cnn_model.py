@@ -175,7 +175,11 @@ def describe_runs(num_classes: int | None = None,
     # Ineligible runs are listed: a human may still pick one on purpose, and
     # hiding it entirely would make the imported legacy bundle look missing.
     for score, checkpoint, results in find_runs(runs_dir, include_ineligible=True):
-        classes = results.get("classes") or []
+        # The importers write `classes`; ip102_bench.save_run writes
+        # `class_names`. Reading only one key left every notebook-trained run
+        # reporting no class list, which silently skipped the check below --
+        # the one thing this panel exists to tell someone.
+        classes = results.get("classes") or results.get("class_names") or []
         label = str(checkpoint.parent.relative_to(runs_dir))
         # The class count is checked first because it is the one problem that
         # re-importing cannot fix: a model trained on a different set of pests

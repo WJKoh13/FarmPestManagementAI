@@ -239,8 +239,10 @@ ip102_bench/          the shared harness
 
 app/                  the offline pest-assistant chatbot — see below
 notebooks/            one per person; _TEMPLATE.ipynb is the starting point
-scripts/              setup_data.py, check_data.py, import_propestnet_run.py
+scripts/              setup_data.py, check_data.py, import_*_run.py, evaluate_tta.py
 docs/propestnet.md    ProPestNet: architecture, results, ablation, dataset
+docs/custom_cnn.md    custom_cnn (Zi Yang): architecture, results, serving
+docs/vgg19_beatrice.md  VGG19 (Beatrice): architecture, her settings, serving
 data_manifests/       the committed dataset definition + generated CSVs
   splits_top15.json   the train/val/test split everyone shares
   boxes_top15.json    one box per image: the largest annotated object
@@ -276,11 +278,21 @@ Or separately:
 .venv/bin/python -m streamlit run app/streamlit_app.py
 ```
 
-It serves **ProPestNet** (`docs/propestnet.md`) at its own preprocessing — 128px,
-ImageNet normalization — read from the checkpoint, so the two cannot drift apart
-silently. The app loads the highest-scoring run in `runs/`; see
-`scripts/import_propestnet_run.py --help` to add one. With no usable checkpoint
-it says so in a banner rather than serving noise.
+The app loads the highest-scoring run in `runs/` and serves every model at *its
+own* preprocessing, read from the checkpoint rather than assumed — the three
+that exist disagree on all of it:
+
+| Model | Doc | Input | Normalization | Crop margin |
+|---|---|---|---|---:|
+| ProPestNet | `docs/propestnet.md` | 128px | ImageNet | 0.25 |
+| custom_cnn (Zi Yang) | `docs/custom_cnn.md` | 160px | `norm_stats.json` | 0.25 |
+| VGG19 (Beatrice) | `docs/vgg19_beatrice.md` | 128px | ImageNet | 0.05 |
+
+`save_run` writes those five values into every checkpoint it produces, which is
+what stops a 160px protocol run from being fed 128px ImageNet-normalized images
+without anything erroring. To add a run trained elsewhere, see
+`scripts/import_propestnet_run.py --help` or `scripts/import_vgg19_run.py --help`.
+With no usable checkpoint the app says so in a banner rather than serving noise.
 
 ### Function calling
 
