@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +40,10 @@ class LoadedModel:
     is_trained: bool = False
     under_trained: bool = False
     reason: str = ""
+    # Which architecture, and whose run. A datestamped path under runs/ answers
+    # neither, and both surfaces that report what is loaded had only the path.
+    model_name: str = ""
+    author: str = ""
     class_names: list[str] = field(default_factory=list)
     display_names: list[str] = field(default_factory=list)
     image_size: int = DEFAULT_IMAGE_SIZE
@@ -64,6 +69,8 @@ class LoadedModel:
     def adjusts_for_prior(self) -> bool:
         """Whether this checkpoint carries a usable prior correction."""
         return bool(self.train_class_prior) and self.logit_adjust_tau != 0.0
+
+    @property
     def trained_on_box_crops(self) -> bool:
         """Whether a photo with no annotated box is out of distribution here.
 
@@ -72,6 +79,11 @@ class LoadedModel:
         say so rather than quietly answering anyway.
         """
         return self.crop_mode == "box"
+
+    @property
+    def display_name(self) -> str:
+        """``custom_cnn (Zi Yang)`` -- what a human calls this run."""
+        return _with_author(self.model_name or "unknown", self.author)
 
 
 def _score(results: dict) -> float:
@@ -91,6 +103,26 @@ def _score(results: dict) -> float:
         if results.get(key) is not None:
             return float(results[key])
     return -1.0
+
+
+def _with_author(model: str, author: str | None) -> str:
+    """``custom_cnn_ziyang`` by ``Zi Yang`` -> ``custom_cnn (Zi Yang)``.
+
+    Four people's models share one dropdown, so whose a run is matters as much
+    as which architecture it is. Registry keys often already carry the name --
+    they have to be unique and stable, because the app rebuilds the
+    architecture from that exact string -- so the suffix is stripped before the
+    readable name is appended rather than printing it twice.
+
+    Only an exact trailing match is stripped: `vgg16` must never lose anything
+    to an author called `Vic`, and a run with no recorded author is returned
+    untouched rather than guessed at.
+    """
+    if not author:
+        return model
+    slug = re.sub(r"[^a-z0-9]", "", author.lower())
+    stripped = re.sub(rf"[_-]{re.escape(slug)}$", "", model, flags=re.IGNORECASE) if slug else model
+    return f"{stripped or model} ({author})"
 
 
 def is_eligible_for_automatic_selection(results: dict) -> bool:
@@ -197,22 +229,26 @@ def describe_runs(num_classes: int | None = None,
         model = results.get("model") or results.get("model_name") or "unknown"
         under_trained = bool(results.get("under_trained"))
         accuracy = _test_accuracy(results)
+        named = _with_author(model, results.get("author"))
 
         # What a picker shows. `label` stays the folder path -- it is what an
         # error message has to name so the folder can be found -- but nobody
         # using this app should have to read a datestamped directory to choose
         # a model.
         if under_trained:
-            display_label = f"{model} — early test build, not for advice"
+            display_label = f"{named} — early test build, not for advice"
         elif accuracy is None:
-            display_label = f"{model} — not scored on the test set"
+            display_label = f"{named} — not scored on the test set"
         else:
-            display_label = f"{model} — {accuracy:.0%} accurate"
+            display_label = f"{named} — {accuracy:.0%} accurate"
 
         automatic = is_eligible_for_automatic_selection(results)
         described.append({
             "label": label,
             "display_label": display_label,
+            # The name without the accuracy suffix, for surfaces that report a
+            # run's identity rather than offer it as a choice.
+            "display_name": named,
             "path": checkpoint,
             "score": score,
             "accuracy": accuracy,
@@ -333,6 +369,8 @@ def _try_load(
         is_trained=True,
         under_trained=bool(results.get("under_trained")),
         reason=str(results.get("under_trained_note", "")),
+        model_name=str(results.get("model") or model_name),
+        author=str(results.get("author") or ""),
         class_names=list(class_names),
         display_names=list(display_names),
         image_size=int(checkpoint.get("image_size", results.get("image_size", DEFAULT_IMAGE_SIZE))),

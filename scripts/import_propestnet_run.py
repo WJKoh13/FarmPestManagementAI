@@ -68,6 +68,8 @@ def main() -> None:
     parser.add_argument("--run-id", help="output folder name (default: today + epochs)")
     parser.add_argument("--model-name", default="propestnet",
                         help="registry key to rebuild the architecture with")
+    parser.add_argument("--author", default="Wen Jun",
+                        help="whose run this is; shown beside the model in the picker")
     args = parser.parse_args()
 
     if not args.checkpoint.is_file():
@@ -146,6 +148,10 @@ def main() -> None:
     results = {
         "model": "ProPestNet",
         "model_name": args.model_name,
+        # Whose run this is. The model picker shows it beside the architecture,
+        # because four people's models in one dropdown is a question of "whose"
+        # at least as often as "which".
+        "author": args.author,
         "subset": protocol.subset_name,
         "classes": class_names,
         "image_size": image_size,

@@ -180,7 +180,7 @@ with st.sidebar:
             for run in runs:
                 if not run["usable"]:
                     st.markdown(
-                        f'<div class="side-note bad">✗ {run["model"]} — {run["problem"]}<br>'
+                        f'<div class="side-note bad">✗ {run["display_name"]} — {run["problem"]}<br>'
                         f'<span class="side-note-path">{run["label"]}</span></div>',
                         unsafe_allow_html=True,
                     )
