@@ -34,6 +34,9 @@ runs/
 logs/
 wandb/
 
+# Saved chatbot conversations and the photos farmers uploaded to them
+.chats/
+
 # Jupyter
 .ipynb_checkpoints/
 */.ipynb_checkpoints/*
