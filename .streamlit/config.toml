@@ -1,0 +1,19 @@
+# Streamlit's own theme tokens. These colour the native widget chrome — menus,
+# selectboxes, spinners — that CSS in app/ui_theme.py cannot reliably reach.
+# Keep them in step with ui_theme.LIGHT; that module is the source of truth for
+# everything else, and it also carries the dark set (Streamlit 1.60 has no
+# [theme.dark] section, so dark mode is applied from Python).
+
+[theme]
+base = "light"
+primaryColor = "#4e7d5c"
+backgroundColor = "#f7f6f2"
+secondaryBackgroundColor = "#eceee6"
+textColor = "#2f3a30"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
