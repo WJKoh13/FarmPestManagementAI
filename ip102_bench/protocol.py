@@ -112,15 +112,39 @@ class Protocol:
         return stats["mean"], stats["std"]
 
     @property
-    def class_names(self) -> list[str]:
-        """Class names ordered so that ``class_names[i]`` is project label ``i``."""
-        meta_path = self.manifest_dir / "classes.json"
+    def classes_path(self) -> Path:
+        """Where the class list lives.
+
+        A subset may declare its own ``classes_json`` so the file can be
+        committed and used on a machine that has no IP102 images -- the app
+        needs the names without the 4.8 GB archive. ``setup_data.py`` writes
+        back to this same path, so there is only ever one class list.
+        """
+        declared = self.subset.get("classes_json")
+        return resolve_path(declared) if declared else self.manifest_dir / "classes.json"
+
+    @property
+    def class_metadata(self) -> list[dict[str, Any]]:
+        """The raw class entries, in project-label order."""
+        meta_path = self.classes_path
         if not meta_path.is_file():
             raise FileNotFoundError(
                 f"{meta_path} not found. Run `python scripts/setup_data.py` first."
             )
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        return [entry["class_name"] for entry in meta["classes"]]
+        return json.loads(meta_path.read_text(encoding="utf-8"))["classes"]
+
+    @property
+    def class_names(self) -> list[str]:
+        """Class names ordered so that ``class_names[i]`` is project label ``i``."""
+        return [entry["class_name"] for entry in self.class_metadata]
+
+    @property
+    def display_names(self) -> list[str]:
+        """Farmer-facing names. Falls back to de-slugifying ``class_name``."""
+        return [
+            entry.get("display_name") or entry["class_name"].replace("_", " ").capitalize()
+            for entry in self.class_metadata
+        ]
 
     @property
     def num_classes(self) -> int:

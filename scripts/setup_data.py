@@ -52,13 +52,22 @@ def load_class_names() -> dict[int, str]:
 
     ``classes.txt`` is 1-indexed ('1  rice leaf roller'), so label n is on line n+1.
     """
+    return {label: slugify(raw) for label, raw in load_raw_class_names().items()}
+
+
+def load_raw_class_names() -> dict[int, str]:
+    """Map original IP102 label (0-based) -> the name as written in classes.txt.
+
+    Kept unslugified so ``display_name`` can show 'Cicadella viridis' rather
+    than 'cicadella_viridis' to a farmer.
+    """
     if not CLASSES_TXT.is_file():
         sys.exit(f"ERROR: {CLASSES_TXT} not found. Extract the IP102 archive first.")
     names: dict[int, str] = {}
     for line in CLASSES_TXT.read_text(encoding="utf-8", errors="replace").splitlines():
         head, _, rest = line.strip().partition(" ")
         if head.isdigit():
-            names[int(head) - 1] = slugify(rest)
+            names[int(head) - 1] = rest.strip()
     return names
 
 
@@ -230,19 +239,29 @@ def main() -> None:
         print("        per class: "
               + ", ".join(f"{p}={n}" for p, n in sorted(per_class.items())))
 
+    raw_names = load_raw_class_names()
     meta = {
         "subset": protocol.subset_name,
         "source": source,
         "description": subset.get("description", "").strip(),
         "num_classes": len(originals),
         "classes": [
-            {"project_label": proj, "original_label": orig, "class_name": names[orig]}
+            {
+                "project_label": proj,
+                "original_label": orig,
+                "class_name": names[orig],
+                # What the chatbot shows a farmer. Capitalized, but Latin genus
+                # names in classes.txt ('Cicadella viridis') are left alone.
+                "display_name": raw_names[orig][:1].upper() + raw_names[orig][1:],
+            }
             for proj, orig in enumerate(originals)
         ],
         "expected_totals": expected or None,
     }
-    (manifest_dir / "classes.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-    print(f"[ok] wrote classes.json ({len(originals)} classes)")
+    classes_path = protocol.classes_path
+    classes_path.parent.mkdir(parents=True, exist_ok=True)
+    classes_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    print(f"[ok] wrote {classes_path.name} ({len(originals)} classes)")
 
     if failures:
         sys.exit("\nFAILED validation:\n  " + "\n  ".join(failures))
