@@ -14,8 +14,21 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from app.cnn_model import find_runs, load_best_model  # noqa: E402
+from app.conversation import Conversation, PestContext  # noqa: E402
+from app.ollama_client import OllamaClient  # noqa: E402
 from app.pest_assistant import CONFIDENCE_FLOOR, PestAssistant, load_class_metadata  # noqa: E402
 from app.treatment_guides import GENERIC_GUIDE, TREATMENT_GUIDES, treatment_guide  # noqa: E402
+
+
+def offline_assistant() -> PestAssistant:
+    """An assistant pinned to the no-language-model path.
+
+    Pointing the client at a closed port is deliberate. These tests assert what
+    the app says when Ollama is down, and reading that off the real client would
+    make them pass or fail depending on whether the developer happens to have it
+    running.
+    """
+    return PestAssistant(llm=OllamaClient(base_url="http://127.0.0.1:9"))
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 IMAGE_DIR = PROJECT_ROOT / "IP102_v1.1" / "Detection" / "VOC2007" / "JPEGImages"
@@ -79,18 +92,54 @@ def test_loaded_model_reports_its_own_preprocessing():
 
 # -------------------------------------------------------------------- the chat
 def test_text_only_reply_asks_for_a_photo():
-    assistant = PestAssistant()
-    reply = assistant.chat_reply("hello")
+    reply = offline_assistant().chat_reply("hello")
     assert reply["pest_name"] is None
     assert "photo" in reply["message"].lower()
 
 
 def test_advice_question_answers_without_a_language_model():
     """Ollama is optional; with it down the reply must still be useful."""
-    assistant = PestAssistant()
-    reply = assistant.chat_reply("how do I choose an organic treatment?")
+    reply = offline_assistant().chat_reply("how do I choose an organic treatment?")
     assert len(reply["message"]) > 100
     assert "offline fallback mode" not in reply["message"]
+
+
+def test_a_follow_up_resolves_against_the_pest_already_identified():
+    """'how often do I spray it?' must not need the photo sent again."""
+    assistant = offline_assistant()
+    chat = Conversation(pest=PestContext("aphids", "Aphids", 0.81))
+    chat.add("user", "what is this?", image_path="/photos/a.jpg")
+    chat.add("assistant", "Aphids.")
+
+    reply = assistant.chat_reply("how often should I spray it?", conversation=chat)
+
+    assert reply["pest_name"] == "aphids"
+    # With Ollama down the answer is the aphid guide itself, not an apology.
+    assert "insecticidal soap" in reply["message"]
+
+
+def test_the_pest_in_hand_reaches_the_system_prompt():
+    assistant = offline_assistant()
+    chat = Conversation(pest=PestContext("aphids", "Aphids", 0.81))
+
+    prompt = assistant.system_prompt("is it safe for bees?", chat)
+
+    assert "Aphids" in prompt
+    assert "insecticidal soap" in prompt          # the guide is attached
+    assert "do not contradict it" in prompt       # and it is binding
+
+
+def test_a_text_turn_sends_history_and_the_rules():
+    assistant = offline_assistant()
+    chat = Conversation()
+    chat.add("user", "my kale has aphids")
+    chat.add("assistant", "Check the leaf undersides.")
+
+    turn = assistant.prepare_turn("and now?", conversation=chat)
+
+    assert turn["messages"][0]["role"] == "system"
+    assert [message["role"] for message in turn["messages"][1:]] == ["user", "assistant", "user"]
+    assert turn["messages"][-1]["content"] == "and now?"
 
 
 @needs_model
