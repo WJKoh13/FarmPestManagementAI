@@ -4,8 +4,9 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 8.1 Stage 1 complete — E5–E9 all run; no arm beat its control** |
-| Next phase | **Awaiting direction** — confirmation, combined recipes and Phase 9 all require explicit approval |
+| Current phase completed | **E4/E5 bounding-box cropping complete — cropping IMPROVED both detection scopes** |
+| Next phase | **Awaiting direction** — seed replication, a crop+context arm and Phase 9 all require explicit approval |
+| E4/E5 verdict | **Cropping wins on both scopes**: det_top10 +0.0428, det_top15 +0.0575 validation macro F1, both above the 0.01 noise threshold, both with balanced accuracy and the train-val gap moving the same way. **Single seed.** Not comparable with rice10/full102 — different images, different classes |
 | Phase 8.1 verdict | **All 9 experiments negative.** E5 (TTA/ensembles), E6a/b (lr), E7a/b (MixUp/CutMix), E8 (SupCon), E9a/b (weighting). Best arm −0.0012. E0 and the Phase 8 protocol survive unchanged |
 | Scope recommendation | **`rice10`** — on knowledge-base feasibility and rare-class measurement, not on any macro F1 ranking |
 | Phase 8 result | `custom_cnn` **0.5443** vs `baseline_cnn` 0.4258 full102 validation macro F1 (+0.1185, single seed) |
@@ -19,7 +20,8 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | **906 passed** (760 through Phase 8, plus 146 in Phase 8.1) |
+| Test suite | **977 passed** (760 through Phase 8, 146 in Phase 8.1, 71 in E4/E5) |
+| Scopes | Four: `rice10`, `full102` (classification) and `det_top10`, `det_top15` (detection, added for E4/E5) |
 | Lint / types | `ruff` clean, `mypy` clean |
 | Models (as shipped) | `baseline_cnn` 1.15M params, `custom_cnn` 1.44M params (rice10) |
 | Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
@@ -1381,6 +1383,107 @@ Peak VRAM is unchanged at ~852 MiB for every arm, including E8 — the projectio
 head adds ~50k parameters and the contrastive similarity matrix is 64x64. The
 auxiliary objective costs essentially nothing in memory or time.
 
+### E4/E5 — IP102 detection bounding-box cropping (complete)
+
+Four runs on the IP102 **Detection** subset, in two controlled pairs, asking one
+question: *does a padded bounding-box crop beat the full frame?* Seed 1337, one
+run at a time, test split never built.
+
+> **Naming.** These reuse the labels `E4`/`E5`, which above refer to the 224x224
+> seed confirmation and the TTA/ensemble screen on `rice10`. They are unrelated
+> experiments on a different dataset. Referred to here as **E4/E5 cropping**.
+
+**Result: cropping improved both scopes, on every reading.**
+
+| | E4A full frame | E4B crop 15% | Δ | E5A full frame | E5B crop 15% | Δ |
+| --- | --- | --- | --- | --- | --- | --- |
+| Scope | det_top10 | det_top10 | | det_top15 | det_top15 | |
+| **Macro F1** | 0.7199 | **0.7627** | **+0.0428** | 0.6028 | **0.6603** | **+0.0575** |
+| Balanced accuracy | 0.7166 | **0.7526** | +0.0360 | 0.5999 | **0.6439** | +0.0440 |
+| Accuracy | 0.7620 | **0.8015** | +0.0394 | 0.7372 | **0.7676** | +0.0304 |
+| Train-val gap | +0.1970 | **+0.1744** | −0.0226 | +0.2237 | **+0.2061** | −0.0176 |
+| Best epoch | 50 / 60 | 53 / 60 | | 45 / 60 | 48 / 60 | |
+| Net corrected samples | | **+54** | | | **+44** | |
+
+**Both margins clear the 0.01 noise threshold**, and unlike the rice10 E2 case
+the supporting metrics all move the same way: balanced accuracy rises, so the
+gain is not concentrated in the common classes, and the train-validation gap
+*narrows*, so cropping is not simply making the training set easier to memorise.
+Validation **loss** also falls (E4: 1.15 → 1.05), which a memorisation effect
+would not produce.
+
+**The per-sample flips reconcile exactly with the accuracy change.** E4 corrected
+145 validation images and broke 91, a net +54 of 1,370 = +3.94%, matching the
+recorded +0.0394 accuracy delta; E5 is +157/−113 = +44 of 1,446 = +3.04% against
++0.0304. Cropping is not uniformly beneficial — it breaks real samples — but it
+wins roughly 1.6 to 1.
+
+**Per class**, E4 improved 9 of 10 (best: class 3 +0.1003, class 6 +0.0911,
+class 4 +0.0803; only class 5 regressed, −0.0180). E5 improved 10 of 15, with
+much larger swings in both directions (class 9 +0.2682, class 6 +0.2640, class 2
++0.2182 on 7 support; worst class 1 −0.0533). The E5 losers are mostly small
+classes, where a handful of images moves F1 a long way.
+
+**The crop audit explains why the effect is moderate rather than dramatic.**
+Median box area is **43%** of the frame, only 1.5% of boxes are below 10%, and
+**10.3% of padded crops cover the whole image** — those samples are byte-
+identical in both arms. The intervention is smaller than "crop to the insect"
+suggests, which makes a +0.04 to +0.06 gain a reasonable size rather than a
+suspicious one.
+
+#### What was built
+
+`det_top10` and `det_top15` were added to `scopes.py` as first-class scopes, so
+`num_classes` (10 and 15) is derived through the sanctioned path. They read the
+**official** `splits_top*.json` assignment rather than a new random split: it
+already carries a train/val/test partition with a label per image, which
+requirement 3's "documented standard split" clause makes the right choice. All
+9,135 top10 filenames are unique with **zero cross-split leakage**, verified.
+
+**The box convention was determined by measurement, not assumption.** Over 500
+sampled boxes, reading `[x1, y1, x2, y2]` produced **0** out-of-bounds or
+degenerate boxes while `[x, y, w, h]` produced **408**. A test pins this, because
+the wrong reading still trains and still yields plausible numbers.
+
+**The pairing invariant is enforced in code and tested.** `build_detection_records`
+takes no cropping argument, so both arms receive identical records; images whose
+box is missing or unusable are dropped from **both** arms (1 in top10, 2 in
+top15, all in train). A test builds both arms through the real loader and asserts
+identical filenames, order and labels. The crop transform **refuses to fall back
+to the full frame** when a box is absent — a silent fallback would put full-frame
+samples inside the crop arm and quietly destroy the comparison.
+
+Cropping is an on-the-fly transform wrapping the existing pipeline, so the crop
+arm inherits every preprocessing decision unchanged. No JPEG is written; a test
+confirms the source file is byte-identical after cropping.
+
+**New finding — the paired comparison was wrong in its first version, and the
+metrics caught it.** Both arms were initially re-scored through the *control's*
+configuration, feeding the crop model full frames. It loaded without complaint,
+because cropping happens before the pipeline and the two arms therefore share a
+preprocessing fingerprint — the Phase 7.2 fingerprint guard could not see it.
+The symptom was flip counts that contradicted the aggregate metrics: 221 "broken"
+against 95 "corrected" for a pair whose accuracy had *risen*. Each arm is now
+scored through its own config, and the script asserts that re-scored accuracy
+reproduces what training recorded, which is the check that would have caught it
+immediately. A regression test pins both.
+
+**New finding — per-class metrics are not logged for 15-class scopes.**
+`training.py` gates per-class arrays on `num_classes <= 10`, a threshold written
+when the only scopes were rice10 (10) and full102 (102). det_top15 falls outside
+it, so E5's per-class breakdown is **recomputed from predictions** rather than
+read back — exact arithmetic over the same checkpoints, no retraining. The
+recomputed values reconcile with each run's recorded macro F1 to four decimals.
+The threshold was left as-is rather than changed and backfilled, since that would
+mean retraining to regenerate logs.
+
+**Verification.** All four arms resolve to identical `training`, `preprocessing`
+and `model` sections, differing in exactly one resolved field — a test asserts
+this against the resolved config, not the YAML text. Both smoke tests learned
+(macro F1 0.1462 and 0.1501 against 0.10 chance) with 0 AMP skipped steps, and
+all four full runs recorded 0 AMP skipped steps, ~858 MiB peak VRAM and ~8 min
+wall clock. The test suite is **977 passing**, `ruff` and `mypy` clean.
+
 ## Verified invariants
 
 These are enforced by tests and re-checked every phase.
@@ -1584,6 +1687,11 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 42 | **New in Phase 8.1 Stage 1**: every arm is **single-seed (1337)**, and four of the seven landed inside the ±0.02 band that E4 showed can reverse across seeds. Those four (E6a, E6b, E7a, E8) are recorded as *unresolved*, not as "slightly worse" — the screen can rule out large effects but cannot distinguish a small real loss from noise. Only E7b (−0.0769) is outside the band. Confirming any of them would cost 3 seeds x ~6 min on rice10, which is cheap, but nothing there is promising enough to justify it | 9 |
 | 43 | **New in Phase 8.1 Stage 1**: E7a MixUp **improved validation loss (1.5135 vs 1.5989), top-5 (0.8946 vs 0.8821) and selective accuracy (87.0% at threshold 0.7 vs 77.5%) while losing macro F1**. The primary metric and the calibration metrics disagree, so "MixUp did not help" is true only of top-1 discrimination. If the deployed policy is abstention-based — which the scope decision suggests it should be — MixUp may be the better recipe on the metric that actually matters to users, at the cost of coverage (59.4% vs 78.9% at 0.5). This was not the phase's selection criterion and is **not** proposed as a change; it is flagged because Phase 9's uncertainty policy should weigh it | 9 |
 | 44 | **New in Phase 8.1 Stage 1**: E9 established that full102 weighting **redistributes rather than improves** — E9a gained +0.0141 on the rarest quartile and lost −0.0140 on the largest, at roughly 1:1, with balanced accuracy +0.0204 and raw accuracy −0.0136. There is no setting that avoids the trade, and the stronger arm was worse everywhere. Whether to take it is a **product decision** about whether rare-pest recall is worth common-pest accuracy, not a metric decision — and macro F1 will not make it | 9 |
+
+| 45 | **New in E4/E5 cropping**: both results are **single-seed (1337)**. The margins (+0.0428, +0.0575) are 4–6x the 0.01 noise threshold and far larger than the ~0.008 gap E4 failed to confirm, and three independent metrics plus validation loss all agree in direction — so the *direction* is well supported. The *magnitude* is not: risk 30 and risk 34 both apply. Confirming would cost 3 seeds x 4 runs x ~8 min ≈ 1.6 h | 9 |
+| 46 | **New in E4/E5 cropping**: the crop arm requires a bounding box at inference time, which the deployed system **does not have** — there is no detector in this project, and CLAUDE.md scopes detection out. So this result does not translate into a deployable gain as it stands; it is evidence that *localisation* helps, not a usable recipe. Acting on it would require either a detection stage (a new phase) or a weakly-supervised localisation step | 9 |
+| 47 | **New in E4/E5 cropping**: per-class arrays are not logged for scopes with 11–101 classes (`training.py` gates on `num_classes <= 10`). det_top15's breakdown is recomputed post hoc, which is exact but means the *run artifacts themselves* are less complete than a rice10 run's. Any future scope in that range inherits the gap | 9 |
+| 48 | **New in E4/E5 cropping**: 10.3% of padded crops cover the entire frame and are byte-identical in both arms, and the median box already covers 43% of the image. The measured effect is therefore diluted by samples where the intervention does nothing — the gain on the samples cropping actually changes is larger than the headline. This also means the result says little about images where the pest is genuinely small, which is the case a farmer's phone photo is most likely to produce | 9 |
 
 ## Rules in force
 

@@ -552,7 +552,7 @@ def test_comparison_pairs_carry_both_arm_configs() -> None:
     against 95 "corrected" for a pair whose accuracy had risen).
     """
     module = _load_comparison_script()
-    for label, control, treatment, control_cfg, treatment_cfg, scope in module.PAIRS:
+    for label, _control, _treatment, control_cfg, treatment_cfg, scope in module.PAIRS:
         assert control_cfg != treatment_cfg, f"{label} reuses one config for both arms"
         assert "fullframe" in control_cfg
         assert "crop" in treatment_cfg
