@@ -1,0 +1,15 @@
+# E5B - detection top15, BOUNDING-BOX CROP with 15% padding.
+#
+# The treatment arm of the E5 pair. Identical to E4B except for the scope, so
+# the top10 and top15 results answer the same question on two class counts.
+#
+# Differs from exp_det_top15_e5a_fullframe.yaml in exactly one field:
+# `dataset.use_bbox_crop`.
+#
+#   scripts/train.py --config model_custom.yaml --config exp_det_top15_e5b_crop15.yaml
+
+extends: exp_detection_protocol.yaml
+
+dataset:
+  scope: det_top15
+  use_bbox_crop: true

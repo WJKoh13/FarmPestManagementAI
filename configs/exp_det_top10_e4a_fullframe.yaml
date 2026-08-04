@@ -1,0 +1,17 @@
+# E4A - detection top10, FULL-FRAME control.
+#
+# The control arm of the E4 pair. Loads the original JPEG and applies the normal
+# preprocessing pipeline to the whole image; no bounding box is read.
+#
+# Paired with exp_det_top10_e4b_crop15.yaml, which differs in exactly one field:
+# `dataset.use_bbox_crop`. Both arms consume the identical manifest, including
+# the same drop of images whose box is missing or unusable, so the sample sets
+# match even though this arm never needs a box.
+#
+#   scripts/train.py --config model_custom.yaml --config exp_det_top10_e4a_fullframe.yaml
+
+extends: exp_detection_protocol.yaml
+
+dataset:
+  scope: det_top10
+  use_bbox_crop: false

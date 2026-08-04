@@ -1,0 +1,26 @@
+# Phase 8.1 experiment E6a: lower learning rate.
+#
+# Risk 22 records that 0.0015 is the MIDPOINT of the two shipped rates, chosen so
+# that neither architecture in the Phase 7 comparison got its own tuned value.
+# That made the architecture comparison controlled; it never established 0.0015
+# as optimal for `custom_cnn`. E6 is the experiment that asks.
+#
+# THE ONE VARIABLE: training.learning_rate 0.0015 -> 0.0008.
+#
+# Roughly half the control rate. The E0 curves show a train-validation gap
+# (0.8841 train against 0.6103 validation accuracy), which is the signature of a
+# model fitting the training set harder than it generalises. A lower peak rate
+# with the same cosine schedule reaches a flatter region of the loss surface and
+# is the cheapest thing to try before adding any new mechanism.
+#
+# Epochs, warmup, scheduler, weight decay and every augmentation are inherited
+# unchanged, so this isolates the rate.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_rice10_e6a_lr0008.yaml --plan
+
+extends: exp_rice10_protocol_a.yaml
+
+training:
+  learning_rate: 0.0008

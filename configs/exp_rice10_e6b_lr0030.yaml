@@ -1,0 +1,25 @@
+# Phase 8.1 experiment E6b: higher learning rate.
+#
+# The other side of the E6a bracket. Screening a rate needs at least one step in
+# each direction: if only the lower rate were tried and it helped, the result
+# would be indistinguishable from "any change helps", and if it hurt, the
+# possibility that the control is too LOW would never have been tested.
+#
+# THE ONE VARIABLE: training.learning_rate 0.0015 -> 0.0030.
+#
+# Double the control rate, which is also the rate `model_custom.yaml` originally
+# shipped with before the controlled protocol overrode it to the midpoint. A
+# higher peak rate under a cosine schedule is itself a regulariser — it spends
+# longer in the high-rate regime where sharp minima are unstable.
+#
+# Grad clipping stays at 1.0, so an unstable rate produces a visibly worse curve
+# rather than a diverged run.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_rice10_e6b_lr0030.yaml --plan
+
+extends: exp_rice10_protocol_a.yaml
+
+training:
+  learning_rate: 0.0030

@@ -1,0 +1,67 @@
+# The shared training protocol for the E4/E5 bounding-box cropping experiments.
+#
+# The question these experiments answer is narrow: *does feeding the model a
+# padded bounding-box crop instead of the full frame improve classification?*
+# That is only answerable if the crop is the sole difference, so this file holds
+# every setting the four arms share and each arm file states nothing but its
+# scope and its `use_bbox_crop` flag.
+#
+# The protocol is E0 (`exp_rice10_protocol_a.yaml`) carried across unchanged,
+# for the same reason Phase 8 carried it to full102: reusing a settled recipe
+# keeps the crop the only variable and avoids inventing a second one. Learning
+# rate, optimizer, schedule, augmentation, batch size, epochs, early stopping
+# and seed are all E0 values.
+#
+# Architecture is `custom_cnn`, layered separately via model_custom.yaml.
+# EfficientNet and pretrained weights are prohibited project-wide (CLAUDE.md:
+# "torchvision.models, prebuilt architectures, pretrained weights, and
+# downloaded CNN checkpoints are prohibited"), and `custom_cnn` is additionally
+# the architecture E0-E3 used, so these results sit in the same lineage.
+#
+# Usage - four runs, one variable:
+#   scripts/train.py --config model_custom.yaml --config exp_det_top10_e4a_fullframe.yaml
+#   scripts/train.py --config model_custom.yaml --config exp_det_top10_e4b_crop15.yaml
+#   scripts/train.py --config model_custom.yaml --config exp_det_top15_e5a_fullframe.yaml
+#   scripts/train.py --config model_custom.yaml --config exp_det_top15_e5b_crop15.yaml
+#
+# `num_classes` is absent by design: it is derived from dataset.scope (10 or 15).
+
+extends: base.yaml
+
+paths:
+  # Detection images live under their own tree; the Classification images_dir
+  # inherited from base.yaml is unused for these scopes. The loader derives the
+  # JPEGImages directory from dataset_root, so only that has to be right.
+  dataset_root: ip102_v1.1
+
+dataset:
+  # Detection scopes read the official splits_top*.json assignment rather than
+  # the derived Classification manifests, so manifest_version does not apply.
+  image_size: [160, 160]
+  # Each arm sets `scope` and `use_bbox_crop`; nothing else varies.
+  bbox_padding: 0.15
+
+training:
+  optimizer: adamw
+  # E0's midpoint learning rate. Neither arm is tuned independently: tuning the
+  # crop arm alone would reintroduce exactly the confound this file removes.
+  learning_rate: 0.0015
+  weight_decay: 0.05
+  batch_size: 64
+  epochs: 60
+  scheduler: cosine
+  warmup_epochs: 5
+  label_smoothing: 0.1
+  # No imbalance mitigation, as in E0 and Phase 8: macro F1 already penalises
+  # ignoring the tail, and weighting would be a second variable.
+  class_weighting: none
+  grad_clip_norm: 1.0
+  early_stopping:
+    metric: macro_f1
+    mode: max
+    patience: 15
+    min_delta: 0.001
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: macro_f1

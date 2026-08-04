@@ -1,0 +1,50 @@
+# Phase 8.1 experiment E9b: effective-number class weighting on full102.
+#
+# THE ONE VARIABLE: training.class_weighting none -> effective.
+#
+# The effective-number scheme weights by (1-beta)/(1-beta^count), which models
+# the diminishing information each additional near-duplicate image contributes.
+# It differs from inverse-square-root in shape rather than only in strength: it
+# is nearly flat across the large classes, where extra images genuinely add
+# little, and rises sharply only in the tail. On an 82x imbalance with a long,
+# thin tail that is the better-motivated correction, which is why both are
+# screened rather than picking one.
+#
+# beta is set to 0.999, NOT the implementation default of 0.9999. Measured on the
+# real full102 training split, beta controls this scheme entirely:
+#
+#   beta 0.9999 -> 69.52x rare-to-common weight ratio
+#   beta 0.9995 -> 39.52x
+#   beta 0.999  -> 23.53x   <- this arm
+#   beta 0.99   ->  2.90x
+#
+# At the 0.9999 default the ratio is 69.5x against full inverse weighting's 82x,
+# so the arm would have been nearly as aggressive as the option E9 deliberately
+# excludes for being too aggressive at this imbalance — and the two E9 arms would
+# have bracketed the space as "gentle 9.1x" and "nearly maximal", with nothing in
+# between. 0.999 puts this arm at 23.5x: meaningfully stronger than E9a's 9.1x
+# and meaningfully weaker than full inverse, which is what makes the pair a
+# genuine bracket rather than two points at one end.
+#
+# THE ONE VARIABLE is still the weighting scheme. beta is part of the scheme's
+# definition, not a second variable: 'effective' without a stated beta is not a
+# fully specified treatment, which is exactly why it is now configuration and
+# recorded in the run summary rather than left to a library default.
+#
+# WEIGHTS COME FROM THE TRAINING SPLIT ONLY, and sampling is unchanged, exactly
+# as in E9a. The resolved weight vector and beta are both recorded.
+#
+# Full inverse-frequency weighting is NOT screened in this first round: at 82x it
+# is the most aggressive option available and there is no evidence yet that this
+# much correction is useful. It becomes a candidate only if these two arms show
+# the tail responding to weight without an unacceptable accuracy cost.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_full102_e9b_effective.yaml --plan
+
+extends: exp_full102_protocol_a.yaml
+
+training:
+  class_weighting: effective
+  class_weighting_beta: 0.999

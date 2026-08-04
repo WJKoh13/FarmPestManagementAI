@@ -1,0 +1,42 @@
+# Model A: small original baseline CNN.
+#
+# A deliberately plain stack of conv-BN-ReLU blocks, used as the control that
+# Model B must beat. Built from primitive PyTorch layers only; no torchvision
+# architectures and no pretrained weights.
+#
+# `num_classes` is absent by design: it is derived from dataset.scope at build
+# time, so this file trains a 10-way or 102-way head unchanged.
+
+extends: base.yaml
+
+model:
+  name: baseline_cnn
+  # Channel width of each stage; length determines depth.
+  stem_channels: 32
+  stage_channels: [64, 128, 256]
+  dropout: 0.3
+  # Raw logits only. Softmax is applied by metrics/inference, never the model.
+  activation: relu
+  norm: batchnorm
+
+training:
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.05
+  batch_size: 64
+  epochs: 60
+  scheduler: cosine
+  warmup_epochs: 3
+  label_smoothing: 0.05
+  # Training-only; computed from the train split alone.
+  class_weighting: none
+  grad_clip_norm: 1.0
+  early_stopping:
+    metric: macro_f1
+    mode: max
+    patience: 12
+    min_delta: 0.001
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: macro_f1

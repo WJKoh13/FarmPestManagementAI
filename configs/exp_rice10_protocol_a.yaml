@@ -1,0 +1,58 @@
+# Phase 7 experiment 1: the controlled rice10 architecture comparison.
+#
+# One training protocol, two architectures. `baseline_cnn` is the control that
+# `custom_cnn` must beat; the point of the experiment is to attribute any
+# difference to the architecture, which is only possible if nothing else
+# differs.
+#
+# The shipped model configs cannot serve this purpose directly: model_baseline
+# trains at lr 0.001 for 60 epochs with warmup 3, smoothing 0.05 and patience
+# 12, while model_custom trains at lr 0.002 for 80 epochs with warmup 5,
+# smoothing 0.1 and patience 15. A win under those settings would be
+# uninterpretable, since it could come from any of five differences. This file
+# therefore states the whole `training` section explicitly and is layered
+# *after* the model config, so it overrides every field either one sets.
+#
+# Usage — the model architecture is the only thing that varies:
+#   scripts/train.py --config model_baseline.yaml --config exp_rice10_protocol_a.yaml
+#   scripts/train.py --config model_custom.yaml   --config exp_rice10_protocol_a.yaml
+#
+# `num_classes` is absent by design: it is derived from dataset.scope.
+
+extends: base.yaml
+
+dataset:
+  scope: rice10
+
+training:
+  optimizer: adamw
+  # The midpoint of the two shipped rates. Neither architecture is handed its
+  # own tuned value, which is what "same protocol" has to mean; per-architecture
+  # tuning is a separate experiment, run only after the control is established.
+  learning_rate: 0.0015
+  weight_decay: 0.05
+  # 64 at 160x160 measured ~1.5 GiB peak in the Phase 7 plan, well inside the
+  # ~4.8 GiB free on the RTX 4070 Laptop under desktop load.
+  batch_size: 64
+  # 60 epochs over 4,318 rice10 training images is 67 steps per epoch, ~4,020
+  # optimiser steps. Early stopping normally ends the run before the cap.
+  epochs: 60
+  scheduler: cosine
+  warmup_epochs: 5
+  label_smoothing: 0.1
+  # rice10 imbalance is 2.8x, mild enough that unweighted training is the right
+  # control. Weighting is an experiment of its own, not a variable to change
+  # while the architectures are being compared.
+  class_weighting: none
+  grad_clip_norm: 1.0
+  early_stopping:
+    # Macro F1, per docs/TRAINING.md: accuracy on an imbalanced task rewards a
+    # model for ignoring the smaller classes.
+    metric: macro_f1
+    mode: max
+    patience: 15
+    min_delta: 0.001
+  checkpoint:
+    save_best: true
+    save_last: true
+    monitor: macro_f1

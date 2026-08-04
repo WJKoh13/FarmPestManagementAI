@@ -1,0 +1,31 @@
+# Phase 7.2 experiment E1: a longer budget, one variable changed.
+#
+# E0 (exp_rice10_protocol_a.yaml) peaked at epoch 58 of 60 on both arms and
+# neither approached patience 15, so the cosine schedule drove the learning rate
+# to zero while both models were still improving. Both E0 scores are therefore
+# floors, not ceilings, and the question this experiment answers is how much of
+# the gap was simply an unfinished run.
+#
+# THE ONE VARIABLE: epochs 60 -> 100.
+#
+# The cosine schedule is defined over `training.epochs`, so raising the cap
+# automatically stretches the decay across the full 100 epochs rather than
+# holding the E0 shape and appending a flat tail. That is deliberate: a stretched
+# cosine is the correct way to spend a larger budget, and an appended tail at
+# lr ~ 0 would train nothing. It does mean E1 differs from E0 in schedule *shape*
+# as well as length — the two are inseparable for a cosine, and pretending
+# otherwise would be the confound.
+#
+# Everything else — learning rate, batch size, warmup, smoothing, weight decay,
+# augmentation, patience — is inherited unchanged from the E0 protocol.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_rice10_e1_epochs100.yaml --plan
+
+extends: exp_rice10_protocol_a.yaml
+
+training:
+  # 100 epochs over 4,318 rice10 training images is 67 steps per epoch, ~6,700
+  # optimiser steps against E0's 4,020.
+  epochs: 100

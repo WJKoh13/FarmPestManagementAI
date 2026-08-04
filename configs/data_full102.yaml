@@ -1,0 +1,16 @@
+# full102 scope: the complete IP102 classification task.
+#
+# Project labels are identical to the original IP102 labels (0-101).
+
+extends: base.yaml
+
+dataset:
+  scope: full102
+
+# Measured in Phase 1 against the official IP102 manifests. verify_dataset.py
+# fails if the derived manifests disagree with these numbers.
+expected_counts:
+  train: 45095
+  validation: 7508
+  test: 22619
+  total: 75222
