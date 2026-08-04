@@ -1,0 +1,90 @@
+{
+  "subset": "rice10",
+  "source": "classification",
+  "class_mapping_version": "1.0.0",
+  "description": "Class names for scope 'rice10', rendered by scripts/build_app_classes.py from ip102_v1.1/Classification/classes.txt. class_name is the slug used as the treatment-guide key; display_name is what the farmer sees. original_label is the 0-based IP102 label, project_label is this scope's own 0-based label. Slugs for labels also present in classes_top15.json are copied from that file so both scopes resolve to the same treatment guide.",
+  "num_classes": 10,
+  "classes_with_treatment_guide": 0,
+  "classes": [
+    {
+      "project_label": 0,
+      "original_label": 0,
+      "class_name": "rice_leaf_roller",
+      "display_name": "Rice leaf roller",
+      "ip102_name": "rice leaf roller",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 1,
+      "original_label": 1,
+      "class_name": "rice_leaf_caterpillar",
+      "display_name": "Rice leaf caterpillar",
+      "ip102_name": "rice leaf caterpillar",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 2,
+      "original_label": 3,
+      "class_name": "asiatic_rice_borer",
+      "display_name": "Asiatic rice borer",
+      "ip102_name": "asiatic rice borer",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 3,
+      "original_label": 4,
+      "class_name": "yellow_rice_borer",
+      "display_name": "Yellow rice borer",
+      "ip102_name": "yellow rice borer",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 4,
+      "original_label": 5,
+      "class_name": "rice_gall_midge",
+      "display_name": "Rice gall midge",
+      "ip102_name": "rice gall midge",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 5,
+      "original_label": 7,
+      "class_name": "brown_plant_hopper",
+      "display_name": "Brown plant hopper",
+      "ip102_name": "brown plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 6,
+      "original_label": 8,
+      "class_name": "white_backed_plant_hopper",
+      "display_name": "White backed plant hopper",
+      "ip102_name": "white backed plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 7,
+      "original_label": 9,
+      "class_name": "small_brown_plant_hopper",
+      "display_name": "Small brown plant hopper",
+      "ip102_name": "small brown plant hopper",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 8,
+      "original_label": 10,
+      "class_name": "rice_water_weevil",
+      "display_name": "Rice water weevil",
+      "ip102_name": "rice water weevil",
+      "has_treatment_guide": false
+    },
+    {
+      "project_label": 9,
+      "original_label": 11,
+      "class_name": "rice_leafhopper",
+      "display_name": "Rice leafhopper",
+      "ip102_name": "rice leafhopper",
+      "has_treatment_guide": false
+    }
+  ]
+}

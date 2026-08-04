@@ -44,6 +44,11 @@ class LoadedModel:
     image_size: int = DEFAULT_IMAGE_SIZE
     mean: list[float] = field(default_factory=lambda: list(DEFAULT_MEAN))
     std: list[float] = field(default_factory=lambda: list(DEFAULT_STD))
+    # Section 13 of the notebook selects `tau` on validation and records the
+    # training class prior next to it. Both absent means no correction, which is
+    # what every checkpoint written before that section existed gets.
+    logit_adjust_tau: float = 0.0
+    train_class_prior: list[float] = field(default_factory=list)
     # How the box was cropped during training. Part of the preprocessing
     # contract for the same reason mean/std are: a model trained on 0.15-margin
     # crops and served 0.25-margin ones is being fed a distribution it never saw.
@@ -56,6 +61,9 @@ class LoadedModel:
         return len(self.class_names)
 
     @property
+    def adjusts_for_prior(self) -> bool:
+        """Whether this checkpoint carries a usable prior correction."""
+        return bool(self.train_class_prior) and self.logit_adjust_tau != 0.0
     def trained_on_box_crops(self) -> bool:
         """Whether a photo with no annotated box is out of distribution here.
 
@@ -69,11 +77,13 @@ class LoadedModel:
 def _score(results: dict) -> float:
     """Rank a run by the best macro F1 it can evidence.
 
-    Runs write this in three different shapes: nested under ``test``, nested
-    under ``test_with_tta``, or flat at the top level. Read all three rather
-    than silently scoring every run -1.
+    Runs write this in several shapes: nested under ``test``, under
+    ``test_with_tta``, under ``test_with_tta_and_prior``, or flat at the top
+    level. Read all of them rather than silently scoring every run -1. Most
+    corrected first, so a run is ranked by the setting the app will actually
+    serve it under.
     """
-    for section in ("test_with_tta", "test"):
+    for section in ("test_with_tta_and_prior", "test_with_tta", "test"):
         block = results.get(section)
         if isinstance(block, dict) and block.get("macro_f1") is not None:
             return float(block["macro_f1"])
@@ -135,6 +145,24 @@ def find_runs(runs_dir: Path = PROJECT_ROOT / "runs",
     return sorted(candidates, key=lambda item: item[0], reverse=True)
 
 
+def _test_accuracy(results: dict) -> float | None:
+    """The test accuracy of the setting the app actually serves, or None.
+
+    Same order as :func:`_score`, so the number shown next to a run is the one
+    that run is ranked by -- a picker that ranked on the corrected score and
+    displayed the uncorrected one would be quietly lying.
+
+    Returns None rather than falling back to a validation figure: a run that was
+    never scored on test has no accuracy, and presenting a macro-F1 as an
+    accuracy would be a different number under the same name.
+    """
+    for section in ("test_with_tta_and_prior", "test_with_tta", "test"):
+        block = results.get(section)
+        if isinstance(block, dict) and block.get("accuracy") is not None:
+            return float(block["accuracy"])
+    return None
+
+
 def describe_runs(num_classes: int | None = None,
                   runs_dir: Path = PROJECT_ROOT / "runs") -> list[dict]:
     """Summarize every run for a model picker, without loading any weights.
@@ -147,23 +175,50 @@ def describe_runs(num_classes: int | None = None,
     # Ineligible runs are listed: a human may still pick one on purpose, and
     # hiding it entirely would make the imported legacy bundle look missing.
     for score, checkpoint, results in find_runs(runs_dir, include_ineligible=True):
-        classes = results.get("classes") or []
+        # The importers write `classes`; ip102_bench.save_run writes
+        # `class_names`. Reading only one key left every notebook-trained run
+        # reporting no class list, which silently skipped the check below --
+        # the one thing this panel exists to tell someone.
+        classes = results.get("classes") or results.get("class_names") or []
         label = str(checkpoint.parent.relative_to(runs_dir))
+        # The class count is checked first because it is the one problem that
+        # re-importing cannot fix: a model trained on a different set of pests
+        # can never answer for this one, however well its metadata is recorded.
+        # Reporting the metadata gap first would send someone to run an import
+        # that leaves the run exactly as unusable as it was.
         problem = ""
-        if not results.get("model_name"):
-            problem = ("records no model_name, so its architecture is unknown — "
+        if num_classes is not None and classes and len(classes) != num_classes:
+            problem = (f"trained on {len(classes)} pests, this app serves {num_classes} — "
+                       "it belongs to a different dataset, so it cannot be used here")
+        elif not results.get("model_name"):
+            problem = ("does not record which architecture it is — "
                        "re-import it with scripts/import_propestnet_run.py")
-        elif num_classes is not None and classes and len(classes) != num_classes:
-            problem = f"trained on {len(classes)} classes, this app serves {num_classes}"
+
+        model = results.get("model") or results.get("model_name") or "unknown"
+        under_trained = bool(results.get("under_trained"))
+        accuracy = _test_accuracy(results)
+
+        # What a picker shows. `label` stays the folder path -- it is what an
+        # error message has to name so the folder can be found -- but nobody
+        # using this app should have to read a datestamped directory to choose
+        # a model.
+        if under_trained:
+            display_label = f"{model} — early test build, not for advice"
+        elif accuracy is None:
+            display_label = f"{model} — not scored on the test set"
+        else:
+            display_label = f"{model} — {accuracy:.0%} accurate"
 
         automatic = is_eligible_for_automatic_selection(results)
         described.append({
             "label": label,
+            "display_label": display_label,
             "path": checkpoint,
             "score": score,
-            "model": results.get("model") or results.get("model_name") or "unknown",
+            "accuracy": accuracy,
+            "model": model,
             "num_classes": len(classes) or None,
-            "under_trained": bool(results.get("under_trained")),
+            "under_trained": under_trained,
             "usable": not problem,
             "problem": problem,
             "eligible_for_automatic_selection": automatic,
@@ -264,6 +319,14 @@ def _try_load(
     display_names = checkpoint.get("display_names") or [
         name.replace("_", " ").capitalize() for name in class_names
     ]
+    # Written by section 13 of the notebook. Read from the checkpoint first and
+    # results.json second, the same order every other setting here uses.
+    adjustment = results.get("logit_adjustment") or {}
+    prior = checkpoint.get("train_class_prior") or adjustment.get("train_class_prior") or []
+    tau = checkpoint.get("logit_adjust_tau", adjustment.get("tau", 0.0))
+    if len(prior) != checkpoint_classes:
+        # A prior of the wrong length would silently reweight the wrong classes.
+        prior, tau = [], 0.0
     return LoadedModel(
         model=model.to(device).eval(),
         path=checkpoint_path,
@@ -275,6 +338,8 @@ def _try_load(
         image_size=int(checkpoint.get("image_size", results.get("image_size", DEFAULT_IMAGE_SIZE))),
         mean=list(checkpoint.get("mean", DEFAULT_MEAN)),
         std=list(checkpoint.get("std", DEFAULT_STD)),
+        logit_adjust_tau=float(tau),
+        train_class_prior=[float(value) for value in prior],
         # Absent on every bundle written before crop metadata existed, which is
         # why the protocol's 0.25 remains the fallback rather than an error.
         crop_mode=str(checkpoint.get("crop_mode", DEFAULT_CROP_MODE)),

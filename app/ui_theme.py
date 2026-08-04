@@ -235,10 +235,28 @@ def inject_css() -> None:
       }}
       .side-note.bad, .side-note.bad * {{ color: var(--warn) !important; }}
       .side-note code {{ font-size: 0.74rem; }}
+      /* The folder a broken run lives in. Needed to go and fix it, but it is
+         reference material rather than the message, so it sits back. */
+      .side-note .side-note-path {{
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.7rem; opacity: 0.75; word-break: break-all;
+      }}
       [data-testid="stSidebar"] hr {{ border-color: var(--line); margin: 0.9rem 0; }}
       [data-testid="stSidebar"] [data-testid="stExpander"] details {{
         border: 1px solid var(--line); border-radius: 10px; background: transparent;
       }}
+
+      /* ------------------------------------------------------- tool trace */
+      .tool-trace {{
+        display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0.85rem;
+      }}
+      .tool-chip {{
+        font-size: 0.76rem; line-height: 1.5; color: var(--ink-soft);
+        background: var(--surface-alt); border: 1px solid var(--line);
+        border-radius: 999px; padding: 0.12rem 0.62rem;
+      }}
+      /* Dashed, so a step the app added never reads as one the model chose. */
+      .tool-chip.auto {{ border-style: dashed; opacity: 0.78; }}
 
       /* ------------------------------------------------- confidence bars */
       .bars {{ margin: 0.7rem 0 1.15rem; }}
@@ -325,6 +343,36 @@ def confidence_bars(candidates: list[tuple[str, float]], display_names: dict[str
         for name, conf in candidates
     )
     st.markdown(f'<div class="bars">{rows}</div>', unsafe_allow_html=True)
+
+
+TOOL_LABELS = {
+    "classify_pest_image": "Looked at the photo",
+    "lookup_treatment_guide": "Read the organic guide",
+    "search_knowledge_base": "Searched the reference library",
+}
+
+
+def tool_trace(trace: list[dict]) -> None:
+    """What the assistant did before answering, in the order it did it.
+
+    Shown to the farmer in plain words, not tool names: "Looked at the photo"
+    rather than `classify_pest_image`. The system rules forbid the assistant
+    mentioning its own machinery in prose, and it would be odd for the interface
+    to announce what the prose is required to hide.
+
+    Steps the app forced rather than the model choosing are marked, because a
+    trace that quietly presents both as the model's own decisions would be
+    misleading in exactly the place someone would look to check.
+    """
+    if not trace:
+        return
+    chips = "".join(
+        f'<span class="tool-chip{"" if not step.get("auto") else " auto"}">'
+        f'{html.escape(TOOL_LABELS.get(step["name"], step["name"]))}'
+        f'{"" if not step.get("auto") else " · added by the app"}</span>'
+        for step in trace
+    )
+    st.markdown(f'<div class="tool-trace">{chips}</div>', unsafe_allow_html=True)
 
 
 def relative_time(timestamp: float) -> str:

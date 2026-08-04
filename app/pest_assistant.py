@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLASSES_PATH = PROJECT_ROOT / "data_manifests" / "classes_top15.json"
 
 # Below this top-1 probability the assistant offers candidates instead of an
-# identification. The model is 69.2% top-1 against 86.5% top-3 even when fully
+# identification. The model is 77.0% top-1 against 93.3% top-3 even when fully
 # trained, so naming one pest confidently is the wrong shape of answer near the
 # margin -- and a farmer acting on a wrong name wastes a treatment.
 CONFIDENCE_FLOOR = 0.35
@@ -41,6 +41,27 @@ in the field instead of guessing.
 - Never mention AI, models, confidence scores, percentages or anything technical about how \
 the pest was identified.
 - Do not invent what the farmer's crop, region or season is. If it matters, ask."""
+
+# What the agent works under. Built on SYSTEM_RULES rather than replacing it, so
+# the two paths cannot drift on the safety wording -- the offline fallback still
+# sends SYSTEM_RULES verbatim, and a test pins that.
+#
+# The difference is where the guidance comes from. On the fallback path it is
+# pre-injected into the prompt; here the model has to go and fetch it, which is
+# the whole point of the exercise. So these rules are about obligations to call.
+AGENT_RULES = SYSTEM_RULES + """
+
+You have tools, and you must use them. You cannot see photographs, and you do not
+know any treatment by heart.
+- If the farmer has attached a photo and you have not yet identified the pest, \
+call classify_pest_image first. Never guess what is in a photo.
+- Before naming any treatment, product, dose or timing, call lookup_treatment_guide \
+and answer only from what it returns.
+- Call search_knowledge_base when the farmer asks why something works, how a pest \
+lives, or anything the treatment guide does not cover. What it returns is \
+background: it may never be the source of a product name or a dose.
+- Never mention the tools, files, photographs on disk, models, or numbers. Talk \
+only about the pest and what to do about it."""
 
 # The answer when the language model is not running and the question is not
 # about a specific pest. It has to stand on its own: this is what most users see.
@@ -84,6 +105,64 @@ def format_candidates(candidates: list[tuple[str, float]], display_names: dict[s
     lines = [f"| {header} | Confidence |", "|---|---:|"]
     lines += [f"| {display_names.get(name, name)} | {conf:.0%} |" for name, conf in candidates]
     return "\n".join(lines)
+
+
+def identification_view(candidates: list[tuple[str, float]], display_names: dict[str, str],
+                        under_trained: bool = False) -> dict[str, Any]:
+    """How a top-k list is presented to the farmer, in one place.
+
+    Two paths through this app turn candidates into words: `prepare_turn`, which
+    classifies in Python, and `classify_pest_image`, which the language model
+    calls itself. Written twice they would drift -- and the drift a farmer would
+    notice is CONFIDENCE_FLOOR, where one path names a pest that the other has
+    just called uncertain. So both call this.
+
+    Returns the heading with the candidate table, the heading alone (for a UI
+    that draws its own confidence bars), the note that belongs *below* those
+    bars, and the verdict fields the caller needs to make its own decisions.
+    """
+    if not candidates:
+        return {"heading": "", "heading_plain": "", "note": "", "uncertain": True,
+                "pest_name": None, "display_name": "", "confidence": None}
+
+    pest_name, confidence = candidates[0]
+    display_name = display_names.get(pest_name, pest_name.replace("_", " ").title())
+    uncertain = confidence < CONFIDENCE_FLOOR
+
+    notice = ""
+    if under_trained:
+        notice = (
+            "**Testing mode:** this checkpoint is under-trained, so the identification below "
+            "is not reliable. Use it to test the app only.\n\n"
+        )
+
+    if uncertain:
+        opening = "**I am not certain what this is.** Here are the closest matches:"
+        # Sits *below* the candidate list, because it is about that list.
+        note = (
+            "A closer, well-lit photo of the insect filling most of the frame usually "
+            "settles it. The general steps below are safe for any of these."
+        )
+        heading = (
+            f"{notice}{opening}\n\n"
+            + format_candidates(candidates, display_names)
+            + f"\n\n{note}"
+        )
+    else:
+        opening = f"**Possible pest: {display_name}** ({confidence:.0%} confidence)"
+        note = ""
+        others = format_candidates(candidates[1:], display_names, header="Also possible")
+        heading = f"{notice}{opening}" + (f"\n\n{others}" if others else "")
+
+    return {
+        "heading": heading,
+        "heading_plain": f"{notice}{opening}",
+        "note": note,
+        "uncertain": uncertain,
+        "pest_name": pest_name,
+        "display_name": display_name,
+        "confidence": float(confidence),
+    }
 
 
 class PestAssistant:
@@ -156,6 +235,7 @@ class PestAssistant:
         return predict_topk(
             self.model, Path(image_path), self.class_names, self.views,
             k=k, tta=tta, device=self.device, box=box,
+            prior=self.loaded.train_class_prior, tau=self.loaded.logit_adjust_tau,
             # The margin the weights were trained with, not a constant. The
             # legacy custom_cnn import records 0.15; older bundles record
             # nothing and fall back to the protocol's 0.25.
@@ -173,6 +253,20 @@ class PestAssistant:
             "Approved guidance — answer from this and do not contradict it:\n\n"
             + guidance_block(query, self.display_names, pest.slug if pest else None)
         )
+        return "\n\n".join(sections)
+
+    def agent_system_prompt(self, conversation: Conversation | None = None) -> str:
+        """The rules for the tool-calling path, plus the pest already in hand.
+
+        Note what is *absent*: the guidance block. On the fallback path the guides
+        are retrieved in Python and pasted into the prompt; here the model must
+        call lookup_treatment_guide to get them. Pre-injecting them would remove
+        the model's reason to call anything.
+        """
+        sections = [AGENT_RULES]
+        pest = conversation.pest if conversation else None
+        if pest:
+            sections.append(pest.summary())
         return "\n\n".join(sections)
 
     def prepare_turn(self, user_message: str, image_path: str | os.PathLike[str] | None = None,
@@ -205,38 +299,18 @@ class PestAssistant:
                     "pest_name": None, "confidence": None, "uncertain": True, "no_model": True,
                 }
 
-            pest_name, confidence = candidates[0]
-            display_name = self.display_name_for(pest_name)
-            uncertain = confidence < CONFIDENCE_FLOOR
+            view = identification_view(candidates, self.display_names,
+                                       under_trained=self.loaded.under_trained)
+            pest_name = view["pest_name"]
+            confidence = view["confidence"]
+            display_name = view["display_name"]
+            uncertain = view["uncertain"]
+            heading = view["heading"]
+            heading_plain = view["heading_plain"]
+            note = view["note"]
 
-            notice = ""
-            if self.loaded.under_trained:
-                notice = (
-                    "**Testing mode:** this checkpoint is under-trained, so the identification below "
-                    "is not reliable. Use it to test the app only.\n\n"
-                )
-
-            if uncertain:
-                opening = "**I am not certain what this is.** Here are the closest matches:"
-                # Sits *below* the candidate list, because it is about that list.
-                note = (
-                    "A closer, well-lit photo of the insect filling most of the frame usually "
-                    "settles it. The general steps below are safe for any of these."
-                )
-                heading = (
-                    f"{notice}{opening}\n\n"
-                    + format_candidates(candidates, self.display_names)
-                    + f"\n\n{note}"
-                )
-                heading_plain = f"{notice}{opening}"
-                # Advice must not commit to a pest the model could not name.
-                guide = treatment_guide("")
-            else:
-                opening = f"**Possible pest: {display_name}** ({confidence:.0%} confidence)"
-                others = format_candidates(candidates[1:], self.display_names, header="Also possible")
-                heading = f"{notice}{opening}" + (f"\n\n{others}" if others else "")
-                heading_plain = f"{notice}{opening}"
-                guide = treatment_guide(pest_name)
+            # Advice must not commit to a pest the model could not name.
+            guide = treatment_guide("" if uncertain else pest_name)
 
             # The pest in hand, for every later turn in this conversation.
             if conversation is not None:

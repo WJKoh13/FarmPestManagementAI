@@ -93,3 +93,138 @@ def build_vgg16_cnn(num_classes: int = 10, **kwargs) -> VGGCNN:
 
 def build_vgg19_cnn(num_classes: int = 10, **kwargs) -> VGGCNN:
     return VGGCNN(config=CONFIG_E, num_classes=num_classes, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Beatrice's VGG19, as trained in notebooks/Beatrice_vgg19_xml_cropped.ipynb.
+#
+# Copied verbatim from section 9 of that notebook, which is the graded artifact
+# and has to show the architecture inline. ``tests/test_vgg19_beatrice.py``
+# fails if the two ever drift: it execs the notebook cell and compares
+# state-dict keys and parameter count.
+#
+# This is deliberately NOT the ``VGGCNN`` stub above. That stub specifies a
+# half-width, BatchNorm, global-average-pool variant built to a 0.5-5M parameter
+# budget; this is the full-width paper architecture with the three fully
+# connected layers, and it is what her trained weights actually fit. Redefining
+# the ``vgg16``/``vgg19`` keys to mean this instead would orphan any checkpoint
+# saved against the stub's spec, so this gets its own registry key.
+#
+# Every parameter name below is load-bearing: ``features``, ``adaptive_pool``
+# and ``classifier`` are what ``strict=True`` matches when the app rebuilds the
+# network from ``model_name`` alone, so renaming an attribute silently
+# invalidates the checkpoint.
+# ---------------------------------------------------------------------------
+
+
+class VGG19(nn.Module):
+    """Full-width VGG19: 16 convolutions, then three fully connected layers.
+
+    No BatchNorm and no global average pooling -- this is the 2014 architecture
+    as published, which is what the notebook set out to train from scratch.
+    Almost all of its ~139M parameters sit in the first ``Linear(25088, 4096)``.
+    """
+
+    def __init__(
+        self,
+        num_classes,
+        strict_classifier=True,
+        small_classifier_units=512,
+    ):
+        super().__init__()
+
+        self.features = nn.Sequential(
+            # Block 1
+            nn.Conv2d(3, 64, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+
+            # Block 2
+            nn.Conv2d(64, 128, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+
+            # Block 3
+            nn.Conv2d(128, 256, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+
+            # Block 4
+            nn.Conv2d(256, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+
+            # Block 5
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, 3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),
+        )
+
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((7, 7))
+        hidden_units = (
+            4096 if strict_classifier else small_classifier_units
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(512 * 7 * 7, hidden_units),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(hidden_units, hidden_units),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(hidden_units, num_classes),
+        )
+
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(
+                    layer.weight,
+                    mode="fan_out",
+                    nonlinearity="relu",
+                )
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+            elif isinstance(layer, nn.Linear):
+                nn.init.normal_(layer.weight, 0, 0.01)
+                nn.init.constant_(layer.bias, 0)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = self.adaptive_pool(x)
+        x = torch.flatten(x, start_dim=1)
+        return self.classifier(x)
+
+
+def build_vgg19_beatrice(num_classes: int = 15, **kwargs) -> VGG19:
+    """Construct Beatrice's VGG19 with randomly initialized weights.
+
+    The adaptive pool means this accepts any input resolution; her run trained
+    at 128px, which the checkpoint records so the app serves it the same way.
+    """
+    return VGG19(num_classes=num_classes, **kwargs)

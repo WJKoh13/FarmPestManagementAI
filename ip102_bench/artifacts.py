@@ -110,6 +110,10 @@ def save_run(
 
     class_names = protocol.class_names
     num_classes = len(class_names)
+    # The transform these weights were trained through. Recorded in the
+    # checkpoint below, not only here, because the app rebuilds preprocessing
+    # from the checkpoint alone.
+    mean, std = protocol.norm_stats()
 
     y_true, y_pred, confidences, paths = predict_split(model, test_loader, device)
     metrics = compute_metrics(y_true, y_pred, num_classes)
@@ -123,10 +127,23 @@ def save_run(
             "state_dict": result.best_state_dict or model.state_dict(),
             "class_names": class_names,
             "num_classes": num_classes,
+            "display_names": protocol.display_names,
             "epoch": result.best_epoch,
             "val_macro_f1": result.best_val_metric,
             "protocol_version": protocol.version,
             "pretrained": pretrained,
+            # The preprocessing contract. A state dict carries weights, not the
+            # transform that produced them, and the app cannot recover these
+            # from the file otherwise -- it falls back to constants that are
+            # wrong for a protocol run (128px, ImageNet statistics) and serves
+            # every prediction through a distribution the model never saw. That
+            # failure is silent, which is why it is written here rather than
+            # left to a default.
+            "image_size": protocol.image_size,
+            "mean": mean,
+            "std": std,
+            "crop_mode": protocol.crop_mode,
+            "crop_margin": protocol.crop_margin,
         },
         checkpoint_path,
     )
@@ -171,6 +188,8 @@ def save_run(
         "protocol_version": protocol.version,
         "subset": protocol.subset_name,
         "crop_mode": protocol.crop_mode,
+        "crop_margin": protocol.crop_margin,
+        "image_size": protocol.image_size,
         "seed": protocol.seed,
 
         "parameters": total_params,

@@ -52,22 +52,25 @@ training set.
 
 <!-- From the executed notebook: 15 classes, 60 epochs, seed 42. -->
 
-| Metric | ProPestNet | + test-time augmentation |
-|---|---:|---:|
-| Test accuracy | 69.18% | **72.63%** |
-| Test macro-F1 | 0.6077 | **0.6378** |
-| Test macro-precision | 0.5867 | 0.6138 |
-| Test macro-recall | 0.6725 | 0.6849 |
-| Top-3 accuracy | 86.52% | — |
-| Majority-class baseline | 30.41% | 30.41% |
-| Parameters | 10,988,015 | 10,988,015 |
-| Input resolution | 128 x 128 | 128 x 128 |
-| Epochs | 60 of 60 (no early stop) | — |
-| Training time | 123 min on Apple-Silicon MPS | — |
+| Metric | ProPestNet | + TTA | + TTA + prior correction |
+|---|---:|---:|---:|
+| Test accuracy | 68.83% | 74.08% | **76.99%** |
+| Test macro-F1 | 0.5990 | 0.6501 | **0.6757** |
+| Test macro-precision | 0.5780 | 0.6272 | 0.7212 |
+| Test macro-recall | 0.6609 | 0.6965 | 0.6497 |
+| Top-3 accuracy | — | — | **93.30%** |
+| Majority-class baseline | 30.41% | 30.41% | 30.41% |
+| Parameters | 10,988,015 | 10,988,015 | 10,988,015 |
+| Input resolution | 128 x 128 | 128 x 128 | 128 x 128 |
+| Epochs | 60 of 60 (no early stop) | — | — |
+| Training time | 138 min on Apple-Silicon MPS | — | — |
 
-Against a 30.4% majority-class baseline on 15 classes, 72.6% is **2.4x baseline**. The
-**top-3 accuracy of 86.5%** matters more than top-1 for the intended use: showing a farmer
+Against a 30.4% majority-class baseline on 15 classes, 77.0% is **2.5x baseline**. The
+**top-3 accuracy of 93.3%** matters more than top-1 for the intended use: showing a farmer
 three candidates with confidences is more useful than one confident-looking guess.
+
+Both post-processing steps are free at training time and are applied by the app, which
+reproduces the two numbers above to four decimal places on the same split.
 
 #### Test-time augmentation was worth more than expected
 
@@ -75,53 +78,99 @@ Averaging the softmax over deterministic views costs nothing at training time an
 **+3.5 points of accuracy, +0.030 macro-F1**. The setting was chosen on validation and
 applied to the test split exactly once:
 
-| Setting | Passes | Val accuracy | Val macro-F1 |
-|---|---:|---:|---:|
-| centre only (no TTA) | 1 | 0.7047 | 0.6084 |
-| centre + mirror | 2 | 0.6999 | 0.6043 |
-| centre + whole | 2 | 0.7372 | 0.6446 |
-| **centre + whole + mirror** | 4 | **0.7407** | **0.6447** |
+| Setting | Passes | Val macro-F1 |
+|---|---:|---:|
+| centre only (no TTA) | 1 | 0.6045 |
+| centre + mirror | 2 | 0.6085 |
+| centre + whole | 2 | 0.6421 |
+| **centre + whole + mirror** | 4 | **0.6450** |
 
-Note *which* view did the work. Mirroring alone made things slightly **worse**. The whole
-gain comes from the `whole` view — squeezing the entire bounding-box crop into the input
-instead of centre-cropping it. That is the framing hypothesis confirming itself: framing
-is this dataset's dominant nuisance variable, the same finding that made bounding-box
-cropping worth +8 points.
+Note *which* view did the work. Mirroring alone is worth +0.004; the `whole` view is worth
++0.038 — squeezing the entire bounding-box crop into the input instead of centre-cropping
+it. That is the framing hypothesis confirming itself: framing is this dataset's dominant
+nuisance variable, the same finding that made bounding-box cropping worth +8 points.
+
+#### Prior correction — the class weighting was overshooting
+
+The training loss is weighted by inverse class frequency, so wireworm's 34 training images
+push as hard as a class with 450. That corrects for imbalance, but the test table showed it
+correcting **too far**: macro-precision (0.578) sat 8 points *below* macro-recall (0.661),
+the signature of a model naming rare classes more often than it should.
+
+Section 13 tests this without retraining. Divide the predicted probabilities by the training
+prior raised to a power `tau` and renormalise — equivalently, subtract `tau * log(prior)`
+from the logits. `tau = 0` is the untouched model, positive `tau` favours rare classes
+further, negative `tau` pushes back toward the prior. Selected on validation, applied to
+test once:
+
+| tau | Val accuracy | Val macro-F1 | macro-P | macro-R |
+|---:|---:|---:|---:|---:|
+| −2.0 | 0.7033 | 0.5685 | 0.7669 | 0.5034 |
+| −1.5 | 0.7441 | 0.6445 | 0.7696 | 0.5914 |
+| **−1.0** | **0.7746** | **0.6970** | 0.7518 | 0.6627 |
+| −0.5 | 0.7725 | 0.6968 | 0.7073 | 0.6969 |
+| 0.0 (unadjusted) | 0.7324 | 0.6450 | 0.6216 | 0.7040 |
+| +0.5 | 0.3811 | 0.5449 | 0.6125 | 0.5733 |
+
+On test this was worth **+2.9 points of accuracy and +0.026 macro-F1** on top of TTA, and it
+closed the precision/recall gap it was aimed at: precision went 0.627 → 0.721 while recall
+gave back 0.697 → 0.650.
+
+Three honest caveats:
+
+1. **`tau = −1.0` divides the prior out completely**, exactly cancelling the inverse-frequency
+   loss weighting. Read plainly, that weighting was not earning its place — the model scores
+   better with it fully undone. Removing it from training instead was not tested.
+2. **The optimum is a plateau, not a peak.** Validation macro-F1 across `tau` in [−1.0, −0.5]
+   runs 0.6970 / 0.6936 / 0.6940 / 0.6962 / 0.6966 / 0.6968 — the winner beats `tau = −0.5`
+   by 0.0002. The *direction* is well established; the exact value is not. The grid was
+   extended to −3.0 to confirm −1.0 is a genuine interior optimum and not an artifact of
+   where the search stopped.
+3. Unlike a retraining change, this is a **paired** comparison — same weights, same images,
+   only `tau` varies — so no run-to-run variance is hiding in it.
 
 #### The schedule fix, and the evidence it was needed
 
 An earlier run set `CosineAnnealingLR(T_max=60)` with `PATIENCE = 8`, and early-stopped at
 epoch 44 with the learning rate still at ~17% of peak — the low-learning-rate endgame
-never happened. Raising patience to 20 let the schedule finish, and **the best validation
-score then landed at epoch 57 of 60**, inside the window the old setting cut off. The
+never happened. Raising patience to 20 let the schedule finish, and the best validation
+score has landed past that cut-off in both runs since: **epoch 57 of 60 originally, epoch
+50 in the current run**, both inside the window the old setting would have discarded. The
 defect was real, not theoretical.
 
 #### Where the accuracy actually goes — read the per-class table
 
-| Pest | Images | Test F1 |
-|---|---:|---:|
-| grub | 868 | 0.854 |
-| aphids | 203 | 0.788 |
-| flea beetle | 345 | 0.784 |
-| blister beetle | 935 | 0.784 |
-| Cicadellidae | 2,934 | 0.783 |
-| mole cricket | 425 | 0.773 |
-| army worm | 879 | 0.748 |
-| Miridae | 1,265 | 0.648 |
-| Cicadella viridis | 206 | 0.598 |
-| Prodenia litura | 414 | 0.569 |
-| corn borer | 206 | 0.452 |
-| tarnished plant bug | 349 | 0.441 |
-| flax budworm | 410 | 0.427 |
-| **black cutworm** | **153** | **0.367** |
-| **wireworm** | **49** | **0.100** |
+Test F1 per class, with TTA and with the prior correction on top:
 
-Macro-F1 weights every class equally, so **wireworm's 49 images count exactly as much as
-Cicadellidae's 2,934**. Those two smallest classes drag macro-F1 down by roughly 0.06 on
-their own — more than test-time augmentation gained. That is a property of the class list,
-not a failure of the model: with 34 training images, no architecture learns wireworm.
-Accuracy (69.2%) is far less sensitive to this than macro-F1 (0.608), which is why both
-are reported.
+| Pest | Test images | F1 (+TTA) | F1 (+TTA +prior) | change |
+|---|---:|---:|---:|---:|
+| grub | 130 | 0.926 | 0.895 | −0.031 |
+| aphids | 31 | 0.824 | 0.862 | +0.039 |
+| flea beetle | 52 | 0.800 | 0.855 | +0.055 |
+| Cicadellidae | 440 | 0.822 | 0.850 | +0.028 |
+| blister beetle | 141 | 0.806 | 0.820 | +0.014 |
+| mole cricket | 63 | 0.806 | 0.786 | −0.021 |
+| army worm | 132 | 0.754 | 0.740 | −0.014 |
+| Miridae | 189 | 0.704 | 0.710 | +0.006 |
+| Prodenia litura | 62 | 0.651 | 0.673 | +0.021 |
+| Cicadella viridis | 31 | 0.610 | 0.656 | +0.046 |
+| corn borer | 31 | 0.556 | 0.588 | +0.033 |
+| flax budworm | 61 | 0.500 | 0.530 | +0.030 |
+| **black cutworm** | **23** | 0.400 | **0.476** | +0.076 |
+| tarnished plant bug | 53 | 0.504 | **0.361** | **−0.142** |
+| **wireworm** | **8** | 0.089 | **0.333** | **+0.244** |
+
+Macro-F1 weights every class equally, so **wireworm's 8 test images count exactly as much as
+Cicadellidae's 440**. That is a property of the class list, not a failure of the model: with
+34 training images, no architecture learns wireworm, and its F1 swinging 0.089 → 0.333 on a
+post-processing change is a reminder that a class this small measures noise, not skill.
+Accuracy (77.0%) is far less sensitive to this than macro-F1 (0.676), which is why both are
+reported.
+
+The prior correction is not a free lunch across the board: it lifts eleven classes and costs
+three, and **tarnished plant bug loses 0.142** — the largest single move in either direction
+apart from wireworm. It was selected on aggregate validation macro-F1, and that aggregate
+hides per-class losses like this one.
 
 ### The ablation — evidence that each decision earns its place
 
@@ -194,7 +243,20 @@ These were found while building the pipeline, and all four still apply:
    it fed uncropped photos to a model trained on crops. Caught because top-1 accuracy
    disagreed with the confusion matrix on identical images. They now agree exactly.
 
-Section 13 of the notebook writes this up as a reusable debugging playbook.
+5. **Weight decay was applied to every parameter, including BatchNorm.** AdamW decayed all
+   95 parameter tensors, gammas and biases included. That works against the architecture on
+   purpose-built ground: `RESIDUAL_INIT_SCALE` sets each block's second gamma to 0.1 so
+   blocks start near pass-through and the network deepens itself, and weight decay then
+   spends sixty epochs pulling those same gammas toward zero. Decay now applies to the 44
+   Conv2d and Linear weight matrices only; the 51 one-dimensional parameters are excluded.
+
+   **This did not measurably help, and is reported as measured.** The fixed run scored
+   68.83% / 0.5990 against the previous 69.18% / 0.6077 — a difference well inside
+   single-seed variance on non-deterministic MPS, so it establishes neither a gain nor a
+   loss. It is kept because it costs nothing and removes a real internal contradiction, not
+   because it was shown to work. Settling it would need several seeds each way.
+
+Section 15 of the notebook writes this up as a reusable debugging playbook.
 
 ### Dataset
 

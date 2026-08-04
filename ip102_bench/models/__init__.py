@@ -28,7 +28,7 @@ from .googlenet_cnn import build_googlenet_cnn
 from .lightweight_cnn import build_lightweight_cnn
 from .propestnet import build_propestnet
 from .residual_cnn import build_residual_cnn
-from .vgg_cnn import build_vgg16_cnn, build_vgg19_cnn
+from .vgg_cnn import build_vgg16_cnn, build_vgg19_beatrice, build_vgg19_cnn
 
 SCRATCH_REGISTRY = {
     "propestnet": build_propestnet,
@@ -39,9 +39,11 @@ SCRATCH_REGISTRY = {
     "googlenet": build_googlenet_cnn,
     "residual": build_residual_cnn,
     "lightweight": build_lightweight_cnn,
-    # Stable key: the app and scripts/import_custom_cnn_run.py rebuild the
-    # architecture from this name alone. Renaming it orphans every checkpoint.
+    # Stable keys: the app and the import scripts rebuild the architecture from
+    # this name alone. Renaming one orphans every checkpoint saved under it.
     "custom_cnn_ziyang": build_custom_cnn_ziyang,
+    # Full-width paper VGG19, distinct from the half-width `vgg19` spec above.
+    "vgg19_beatrice": build_vgg19_beatrice,
 }
 
 
