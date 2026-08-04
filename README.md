@@ -261,12 +261,46 @@ from the checkpoint, so the two can never drift apart silently.
 
 ```bash
 .venv/bin/python -m streamlit run app/streamlit_app.py    # chat UI
-.venv/bin/python -m uvicorn app.main:app --port 8000      # POST /analyze
+.venv/bin/python -m uvicorn app.main:app --port 8000      # /analyze, /chat, /health
 ```
 
 The app loads the highest-scoring run from `runs/`. To make a trained ProPestNet
 checkpoint available to it, see `scripts/import_propestnet_run.py --help`. With
 no usable checkpoint the app says so in a banner rather than serving noise.
+
+### The language model
+
+The conversation runs on a **local** model through Ollama. It is optional, and
+the app tells you in the sidebar whether it found one:
+
+```bash
+brew install ollama && ollama serve
+ollama pull phi3            # or llama3.2:3b / qwen2.5:3b, then export OLLAMA_MODEL
+```
+
+Without it the assistant still identifies pests and still answers, straight from
+the guides in `app/treatment_guides.py` — the classifier and the written advice
+are the product; the language model only rephrases them around the farmer's own
+question. Nothing leaves the machine either way.
+
+`OLLAMA_BASE_URL`, `OLLAMA_MODEL` and `OLLAMA_TIMEOUT` override the defaults.
+
+### Context
+
+Three things make it a conversation rather than a photo endpoint, all in
+`app/conversation.py`:
+
+- **History** — the last few turns go to the model, so follow-up questions work.
+- **The pest in hand** — `PestContext` records what the last photo was identified
+  as, from the classifier's own top-1, so "how often do I spray it?" needs no
+  second upload.
+- **Grounding** — `app/retrieval.py` scores the fifteen treatment guides against
+  the question and attaches the best ones to the system prompt, under an
+  instruction not to contradict them. Keyword scoring, not embeddings: fifteen
+  short documents do not need a vector index, and it keeps the app dependency-free.
+
+Conversations and their photos are saved under `.chats/` (git-ignored), so
+closing the laptop does not lose an identification.
 
 ## Switching datasets
 
