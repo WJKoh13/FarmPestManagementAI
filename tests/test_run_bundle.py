@@ -29,7 +29,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.cnn_model import (  # noqa: E402
-    DEFAULT_IMAGE_SIZE, DEFAULT_MEAN, _score, describe_runs, load_best_model,
+    DEFAULT_IMAGE_SIZE, DEFAULT_MEAN, _score, _with_author, describe_runs, load_best_model,
 )
 from ip102_bench.artifacts import save_run  # noqa: E402
 from ip102_bench.models import build_model  # noqa: E402
@@ -140,6 +140,35 @@ def test_the_model_picker_can_read_the_class_count(saved_run):
     assert described[0]["num_classes"] == protocol.num_classes
     assert described[0]["usable"], described[0]["problem"]
     assert described[0]["model"] == MODEL_NAME
+
+
+def test_the_picker_names_whose_model_each_run_is(saved_run):
+    """Four people share one dropdown, so "whose" matters as much as "which"."""
+    runs_dir, protocol = saved_run
+    described = describe_runs(num_classes=protocol.num_classes, runs_dir=runs_dir)
+    # The fixture's author is "test", which is not the key's suffix, so the key
+    # is shown whole -- stripping is an exact-match rule, not a guess.
+    assert described[0]["display_label"].startswith(f"{MODEL_NAME} (test)")
+
+
+@pytest.mark.parametrize(
+    "model, author, expected",
+    [
+        # The registry key already carries the name; it is not printed twice.
+        ("custom_cnn_ziyang", "Zi Yang", "custom_cnn (Zi Yang)"),
+        ("vgg19_beatrice", "Beatrice", "vgg19 (Beatrice)"),
+        ("propestnet", "Wen Jun", "propestnet (Wen Jun)"),
+        # No author recorded: left exactly as it was rather than guessed at.
+        ("vgg16_scratch_study", None, "vgg16_scratch_study"),
+        ("vgg16_scratch_study", "", "vgg16_scratch_study"),
+        # Only an exact trailing match is stripped -- `vgg16` must not lose its
+        # digits to an author whose name happens to appear inside the key.
+        ("vgg16", "Vic", "vgg16 (Vic)"),
+        ("beatrice_vgg19", "Beatrice", "beatrice_vgg19 (Beatrice)"),
+    ],
+)
+def test_author_suffix_never_mangles_the_model_name(model, author, expected):
+    assert _with_author(model, author) == expected
 
 
 def test_ranking_uses_the_setting_the_run_will_be_served_under():

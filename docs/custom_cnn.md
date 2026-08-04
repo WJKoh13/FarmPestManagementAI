@@ -65,9 +65,61 @@ imbalanced (2,054 `cicadellidae` training images against 34 `wireworm`).
 
 ## Results
 
-<!-- Filled from runs/custom_cnn_ziyang/<run_id>/results.json -->
+<!-- From runs/custom_cnn_ziyang/20260805-012348/results.json -->
 
-_Pending: written when the training run completes._
+Protocol v1, 15 classes, seed 42. Best epoch **53 of 60** (no early stop), 66 minutes on
+Apple-Silicon MPS.
+
+| Metric | custom_cnn | + test-time augmentation |
+|---|---:|---:|
+| Test accuracy | 72.15% | **75.67%** |
+| Test macro F1 | 0.6205 | **0.6715** |
+| Test macro-precision | 0.6012 | 0.6620 |
+| Test macro-recall | 0.6525 | 0.6911 |
+| Best validation macro F1 | 0.6164 | — |
+| Parameters | 1,437,167 | 1,437,167 |
+| Model size | 5.63 MB | 5.63 MB |
+| CPU latency | 14.8 ms/image | ~59 ms/image (4 passes) |
+
+Against a 30.4% majority-class baseline this is **2.5x baseline**. TTA is worth +3.5 points
+of accuracy and +0.051 macro F1, the same pattern ProPestNet saw.
+
+### Against ProPestNet, measured the same way
+
+| | custom_cnn | ProPestNet |
+|---|---:|---:|
+| Test macro F1, single pass | **0.6205** | 0.5990 |
+| Test macro F1, with TTA | **0.6715** | 0.6501 |
+| Test macro F1, TTA + class prior | not measured | **0.6757** |
+| Parameters | **1,437,167** | 10,988,015 |
+| Model size | **5.63 MB** | 44 MB |
+| CPU latency | **14.8 ms** | ~30 ms |
+
+On identical settings this network wins on both single pass and TTA, with **7.6x fewer
+parameters** — which is the depthwise-separable factorization doing exactly what the
+architecture was designed to do.
+
+ProPestNet still holds the served slot, by 0.0042. The whole of that margin is its
+logit-adjustment step: its notebook swept `tau` on validation and recorded a
+prior-corrected score, and `app.cnn_model._score` ranks each run by the most corrected
+setting it can evidence, because that is what a farmer actually gets. `save_run` performs no
+such sweep, so this run has no equivalent number — not because the correction would not help
+it, but because nothing has measured it. Running the same validation-selected sweep here is
+the obvious next step, and until it happens the top slot is decided by a difference in
+bookkeeping rather than in accuracy.
+
+### Where the errors are
+
+| Best classes | F1 | | Worst classes | F1 | Test images |
+|---|---:|---|---|---:|---:|
+| grub | 0.869 | | wireworm | **0.143** | 8 |
+| flea_beetle | 0.847 | | black_cutworm | 0.407 | 23 |
+| cicadellidae | 0.826 | | tarnished_plant_bug | 0.443 | 53 |
+
+`wireworm` is the known problem the protocol keeps on purpose: 49 images in the whole
+dataset, 34 of them for training, 8 in test. Its score is noise, and because macro F1 weights
+every class equally it drags the headline metric down by itself — for every model in the
+table, equally. Report it rather than hide it.
 
 ## How the app serves it
 

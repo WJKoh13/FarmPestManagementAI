@@ -1,7 +1,8 @@
 """The backend. Everything that thinks lives behind here.
 
 The three components the app is built from are a front end (`streamlit_app.py`),
-this backend, and the AI engine it owns -- the ProPestNet CNN, the local language
+this backend, and the AI engine it owns -- whichever pest CNN in `runs/` scores
+highest (ProPestNet, custom_cnn, VGG19 -- see `docs/`), the local language
 model, and the reference library. The front end holds none of them: it sends a
 message to `/agent` and renders what comes back, so it imports no torch, loads no
 weights and makes no decisions.
@@ -90,6 +91,9 @@ def read_root() -> dict[str, object]:
     return {
         "message": "Organic Farm Pest Assistant is running",
         "model_loaded": assistant.model is not None,
+        # Which model, in the form a person uses -- `custom_cnn (Zi Yang)`. The
+        # path answers where, not whose, and several people's runs live here.
+        "model": assistant.loaded.display_name if assistant.model else None,
         "model_path": str(assistant.loaded.path) if assistant.loaded.path else None,
         "num_classes": len(assistant.class_names),
         "under_trained": assistant.loaded.under_trained,
@@ -106,6 +110,8 @@ def health() -> dict[str, object]:
         "ok": assistant.model is not None,
         "classifier": {
             "loaded": assistant.model is not None,
+            "model": assistant.loaded.display_name if assistant.model else None,
+            "author": assistant.loaded.author or None,
             "path": str(assistant.loaded.path) if assistant.loaded.path else None,
             "under_trained": assistant.loaded.under_trained,
             "reason": assistant.loaded.reason,
@@ -152,6 +158,7 @@ def select_model(choice: ModelChoice) -> dict[str, object]:
     assistant = PestAssistant(model_path=choice.path)
     agent = PestAgent(assistant=assistant)
     return {"ok": assistant.model is not None,
+            "model": assistant.loaded.display_name if assistant.model else None,
             "path": str(assistant.loaded.path) if assistant.loaded.path else None,
             "reason": assistant.loaded.reason}
 
