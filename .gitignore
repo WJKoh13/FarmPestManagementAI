@@ -1,24 +1,60 @@
 # macOS
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
 
-# Datasets - never commit images
-IP102_v1.1/
+# Datasets and archives — too large for git, re-downloadable
 data/
+04-cnn/data/
+IP102_v1.1/
+# Sample photos for trying the chatbot; regenerate with scripts/make_sample_images.py
+sample_images/
+*.tar
+*.tar.gz
+*.zip
+*.7z
 
-# Training outputs - never commit checkpoints
-runs/
-*.pt
-*.pth
-
-# Manifests are large and fully regenerable from the committed splits_top10.json
-# (python scripts/setup_data.py). classes.json and norm_stats.json ARE committed:
-# they are small, and everyone must normalize identically for the runs to be
-# comparable.
+# Generated manifests. Regenerable from the committed splits/boxes JSON with
+# `python scripts/setup_data.py`. classes*.json and norm_stats.json ARE committed:
+# they are small, and everyone must normalize identically for runs to compare.
 data_manifests/*.csv
 
+# Model weights and checkpoints
+*.h5
+*.hdf5
+*.ckpt
+*.pt
+*.pth
+*.pb
+*.tflite
+*.onnx
+checkpoints/
+runs/
+logs/
+wandb/
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+Untitled*.ipynb
+
 # Python
-.venv/
-venv/
 __pycache__/
 *.py[cod]
-.ipynb_checkpoints/
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.conda/
+
+# Editors
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.local

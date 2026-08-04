@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.cnn_model import describe_runs
 from app.pest_assistant import PestAssistant
 
 
@@ -73,6 +74,40 @@ with st.sidebar:
     if st.button("+ New chat", use_container_width=True):
         new_chat()
         st.rerun()
+
+    st.divider()
+    st.caption("MODEL")
+    runs = describe_runs(num_classes=len(st.session_state.assistant.class_names))
+    if not runs:
+        st.caption("No runs in runs/. Import one with scripts/import_propestnet_run.py.")
+    else:
+        usable = [run for run in runs if run["usable"]]
+        current = str(st.session_state.assistant.loaded.path or "")
+        options = [str(run["path"]) for run in usable]
+        index = options.index(current) if current in options else 0
+
+        if usable:
+            chosen = st.selectbox(
+                "Checkpoint", options, index=index,
+                format_func=lambda path: next(
+                    f"{run['label']} — {run['model']}" + (" ⚠" if run["under_trained"] else "")
+                    for run in usable if str(run["path"]) == path
+                ),
+                label_visibility="collapsed",
+            )
+            # Rebuilding is a few seconds of weight loading, so only do it when
+            # the choice actually changed.
+            if chosen != current:
+                st.session_state.assistant = PestAssistant(model_path=chosen)
+                st.rerun()
+
+        # Runs the app cannot serve are listed with the reason rather than
+        # hidden, because "my checkpoint isn't showing up" is the question this
+        # panel exists to answer.
+        for run in runs:
+            if not run["usable"]:
+                st.caption(f"✗ {run['label']} — {run['problem']}")
+
     st.divider()
     st.caption("CHATS")
     for index, saved_chat in enumerate(st.session_state.chats):
@@ -82,16 +117,12 @@ with st.sidebar:
 
 st.title("Organic Farm Pest Management AI")
 st.caption("Offline guidance for quick, organic pest-management decisions")
-if st.session_state.assistant.model is None:
-    st.markdown(
-        '<div class="model-status">CNN unavailable: install PyTorch in the Python environment that runs Streamlit, then restart the app.</div>',
-        unsafe_allow_html=True,
-    )
-elif not st.session_state.assistant.model_is_trained:
-    st.markdown(
-        '<div class="model-status">Demo mode is active. Image predictions use an untrained CNN to test the app flow and are not reliable pest identifications.</div>',
-        unsafe_allow_html=True,
-    )
+
+# One banner, driven by what the loader actually found, so the UI can never
+# claim a healthy model while serving an under-trained or missing one.
+status = st.session_state.assistant.status_message
+if status:
+    st.markdown(f'<div class="model-status">{status}</div>', unsafe_allow_html=True)
 for message in chat["messages"]:
     with st.chat_message(message["role"]):
         if image_path := message.get("image_path"):
@@ -113,8 +144,9 @@ if chat_input:
 
     with st.spinner("Analyzing your pest photo..." if image_path else "Thinking..."):
         result = st.session_state.assistant.chat_reply(user_text, image_path=image_path)
-    response = result["message"]
-    if result["pest_name"]:
-        response += f"\n\n**Detected pest:** {result['pest_name']} ({result['confidence']:.0%} confidence)"
-    chat["messages"].append({"role": "assistant", "content": response})
+    # The reply already carries the ranked candidates and their confidences,
+    # under farmer-facing names. Appending a "Detected pest: <slug>" line on top
+    # restated it in raw slugs, and contradicted the reply outright whenever the
+    # model was too unsure to name one.
+    chat["messages"].append({"role": "assistant", "content": result["message"]})
     st.rerun()
