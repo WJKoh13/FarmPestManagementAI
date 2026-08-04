@@ -300,6 +300,18 @@ Read-only. It never renames, moves, deletes, re-encodes or relabels a source
 image, never edits an official manifest, and cannot be pointed at the test
 split. It only ever *suspects*: `reviewer_decision` is a human's to fill in.
 
+After Phase 8.1 built the ensemble and TTA evaluation:
+
+```bash
+python scripts/evaluate_ensemble.py --scope rice10
+python scripts/evaluate_ensemble.py --config data_full102.yaml --scope full102
+```
+
+Inference only. It never trains, fine-tunes or rewrites a checkpoint. Each member
+is scored through **its own** recorded preprocessing under strict verification,
+raw logits are averaged rather than labels, and ensemble weights are uniform.
+`--split` offers only `validation` and `train`; the test split is refused.
+
 After Phase 3 provisions the development tools, also use when relevant:
 
 ```bash

@@ -27,11 +27,11 @@ import json
 import math
 import time
 import warnings
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import Tensor, nn
@@ -50,7 +50,14 @@ from .checkpoints import (
     restore_rng_state,
     write_metadata_sidecar,
 )
+from .finegrained import (
+    FineGrainedConfig,
+    ProjectionHead,
+    fine_grained_config_from_config,
+    supervised_contrastive_loss,
+)
 from .metrics import ClassificationMetrics, MetricsAccumulator
+from .mixing import BatchMixer, MixingConfig, mixed_criterion, mixing_config_from_config
 from .models import ModelConfig, build_model, model_config_from_config, summarize_model
 
 if TYPE_CHECKING:  # pragma: no cover - import-time typing only
@@ -91,6 +98,11 @@ class TrainingConfig:
         warmup_epochs: Epochs of linear warmup before the main schedule.
         label_smoothing: Cross-entropy label smoothing.
         class_weighting: Scheme name, resolved by the loader from training data.
+        class_weighting_beta: Strength parameter of the ``effective`` scheme,
+            ignored by every other scheme. It governs that scheme entirely: on
+            full102's 82x imbalance, 0.9999 yields a 69.5x weight ratio and
+            0.999 yields 23.5x, so it is the difference between a nearly-maximal
+            correction and a moderate one.
         grad_clip_norm: Gradient-norm clip; ``0`` disables it.
         early_stopping_metric: Monitored metric name.
         early_stopping_mode: ``"max"`` or ``"min"``.
@@ -100,6 +112,9 @@ class TrainingConfig:
         save_last: Whether to write ``last.pt``.
         monitor: Metric that decides which checkpoint is best.
         amp: Whether to use mixed precision when CUDA is available.
+        mixing: Training-only MixUp/CutMix settings. Defaults to ``none``, so a
+            configuration that says nothing about mixing behaves exactly as it
+            did before E7 existed.
     """
 
     optimizer: str = "adamw"
@@ -111,6 +126,7 @@ class TrainingConfig:
     warmup_epochs: int = 5
     label_smoothing: float = 0.1
     class_weighting: str = "none"
+    class_weighting_beta: float = 0.9999
     grad_clip_norm: float = 1.0
     early_stopping_metric: str = "macro_f1"
     early_stopping_mode: str = "max"
@@ -120,6 +136,8 @@ class TrainingConfig:
     save_last: bool = True
     monitor: str = "macro_f1"
     amp: bool = True
+    mixing: MixingConfig = field(default_factory=MixingConfig)
+    fine_grained: FineGrainedConfig = field(default_factory=FineGrainedConfig)
 
     def validate(self) -> TrainingConfig:
         """Check every field.
@@ -167,6 +185,11 @@ class TrainingConfig:
             raise TrainingError(
                 f"training.label_smoothing must be in [0, 1), got {self.label_smoothing}"
             )
+        if not 0.0 <= self.class_weighting_beta < 1.0:
+            raise TrainingError(
+                f"training.class_weighting_beta must be in [0, 1), got "
+                f"{self.class_weighting_beta}"
+            )
         if self.grad_clip_norm < 0:
             raise TrainingError(
                 f"training.grad_clip_norm must be non-negative, got {self.grad_clip_norm}"
@@ -181,6 +204,8 @@ class TrainingConfig:
                 f"training.early_stopping.patience must be at least 1, got "
                 f"{self.early_stopping_patience}"
             )
+        self.mixing.validate()
+        self.fine_grained.validate()
         return self
 
     def to_dict(self) -> dict[str, Any]:
@@ -195,6 +220,7 @@ class TrainingConfig:
             "warmup_epochs": self.warmup_epochs,
             "label_smoothing": self.label_smoothing,
             "class_weighting": self.class_weighting,
+            "class_weighting_beta": self.class_weighting_beta,
             "grad_clip_norm": self.grad_clip_norm,
             "early_stopping": {
                 "metric": self.early_stopping_metric,
@@ -208,6 +234,8 @@ class TrainingConfig:
                 "monitor": self.monitor,
             },
             "amp": self.amp,
+            "mixing": self.mixing.to_dict(),
+            "fine_grained": self.fine_grained.to_dict(),
         }
 
 
@@ -237,6 +265,9 @@ def training_config_from_config(config: Config) -> TrainingConfig:
         warmup_epochs=int(section.get("warmup_epochs", defaults.warmup_epochs)),
         label_smoothing=float(section.get("label_smoothing", defaults.label_smoothing)),
         class_weighting=str(section.get("class_weighting", defaults.class_weighting)),
+        class_weighting_beta=float(
+            section.get("class_weighting_beta", defaults.class_weighting_beta)
+        ),
         grad_clip_norm=float(section.get("grad_clip_norm", defaults.grad_clip_norm)),
         early_stopping_metric=str(
             early.get("metric", defaults.early_stopping_metric)
@@ -252,6 +283,8 @@ def training_config_from_config(config: Config) -> TrainingConfig:
         save_last=bool(checkpoint.get("save_last", defaults.save_last)),
         monitor=str(checkpoint.get("monitor", defaults.monitor)),
         amp=bool(config.get("runtime.amp", defaults.amp)),
+        mixing=mixing_config_from_config(config),
+        fine_grained=fine_grained_config_from_config(config),
     )
     return resolved.validate()
 
@@ -557,7 +590,39 @@ class Trainer:
         )
 
         self.criterion = self._build_criterion()
+        # The projection head is training-only scaffolding. It is built before
+        # the optimiser so its parameters are optimised, and it is deliberately
+        # NOT part of `self.model`: keeping it separate means the saved
+        # state_dict is byte-compatible with a model trained without the
+        # auxiliary objective, so an E8 checkpoint loads into the ordinary
+        # inference path with no special case.
+        self.projection: ProjectionHead | None = None
+        if self.config.fine_grained.enabled:
+            feature_dim = getattr(self.model, "feature_dim", None)
+            if feature_dim is None:
+                raise TrainingError(
+                    "training.fine_grained is enabled but the model exposes no "
+                    "feature_dim; the auxiliary objective needs an embedding path"
+                )
+            self.projection = ProjectionHead(
+                int(feature_dim), self.config.fine_grained.embedding_dim
+            ).to(self.device)
+
         self.optimizer = build_optimizer(self.model, self.config)
+        if self.projection is not None:
+            # The head trains under the same schedule and weight decay policy as
+            # the backbone, so the auxiliary term is one variable rather than a
+            # second optimiser configuration.
+            self.optimizer.add_param_group(
+                {
+                    "params": list(self.projection.parameters()),
+                    "weight_decay": self.config.weight_decay,
+                }
+            )
+        # Seeded from the run seed, so a mixed run is as reproducible as an
+        # unmixed one, and owning its own generator keeps it from consuming the
+        # global RNG stream the dataloader workers draw augmentations from.
+        self.mixer = BatchMixer(self.config.mixing, seed=bundle.seed)
 
         train_loader = bundle.loaders["train"]
         self.steps_per_epoch = max(1, len(train_loader))
@@ -651,12 +716,21 @@ class Trainer:
         lower than a clean pass over the same data. That is the honest number:
         it describes what the model actually saw.
 
+        When ``training.mixing`` is enabled the model trains on mixed images and
+        a lambda-weighted loss, but metrics are still accumulated against the
+        **original hard labels**. A mixed run's training accuracy therefore
+        remains directly comparable with an unmixed run's, and reads lower
+        because the images are genuinely harder rather than because the target
+        changed.
+
         Returns:
             A :class:`TrainPassResult` carrying the metrics, timing and the AMP
             step accounting for this epoch.
         """
         loader = self.bundle.loaders["train"]
         self.model.train()
+        if self.projection is not None:
+            self.projection.train()
         accumulator = MetricsAccumulator(
             self.bundle.num_classes, device=self.device
         )
@@ -677,9 +751,43 @@ class Trainer:
             # bug where a parameter that gets no gradient keeps its previous one.
             self.optimizer.zero_grad(set_to_none=True)
 
+            # Training-only mixing. When disabled this returns the batch
+            # untouched and `mixed_criterion` reduces to the plain criterion
+            # call, so the pre-E7 path is preserved exactly rather than merely
+            # reproduced.
+            mixed = self.mixer.apply(images, targets, training=True)
+
             with torch.amp.autocast("cuda", enabled=self.amp_enabled):
-                logits = self.model(images)
-                loss = self.criterion(logits, targets)
+                if self.projection is None:
+                    logits = self.model(mixed.images)
+                    loss = mixed_criterion(self.criterion, logits, mixed)
+                else:
+                    # One backbone pass feeds both terms. Two passes would cost
+                    # twice as much and, with stochastic depth active, would
+                    # describe two different random subnetworks.
+                    # Cast because ``nn.Module.__getattr__`` is typed as
+                    # returning ``Tensor | Module``, which would make the call
+                    # look invalid. The attribute is guaranteed present: the
+                    # constructor already required ``feature_dim`` before
+                    # building the projection head.
+                    combined = cast(
+                        "Callable[[Tensor], tuple[Tensor, Tensor]]",
+                        self.model.forward_logits_and_features,
+                    )
+                    logits, features = combined(mixed.images)
+                    loss = mixed_criterion(self.criterion, logits, mixed)
+                    # The contrastive term is applied to UNMIXED batches only.
+                    # A mixed image has no single label, so contrasting it
+                    # against a hard label would supervise the embedding with a
+                    # target the pixels do not support. When mixing is off —
+                    # which is the case for every E8 arm — this is every batch.
+                    if not mixed.mixed:
+                        auxiliary = supervised_contrastive_loss(
+                            self.projection(features),
+                            mixed.hard_targets,
+                            temperature=self.config.fine_grained.temperature,
+                        )
+                        loss = loss + self.config.fine_grained.weight * auxiliary
 
             if not torch.isfinite(loss):
                 raise TrainingError(
@@ -691,9 +799,13 @@ class Trainer:
             if self.config.grad_clip_norm > 0:
                 # Gradients must be unscaled before their norm is meaningful.
                 self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.config.grad_clip_norm
-                )
+                # The projection head is optimised, so it must be clipped too;
+                # leaving it out would let the auxiliary term produce an
+                # unbounded update while the backbone stayed clipped.
+                clipped = list(self.model.parameters())
+                if self.projection is not None:
+                    clipped.extend(self.projection.parameters())
+                torch.nn.utils.clip_grad_norm_(clipped, self.config.grad_clip_norm)
             # With AMP the scaler skips the optimiser step on any batch whose
             # gradients overflowed, which routinely includes the first one while
             # the scale is being calibrated. Advancing the schedule on a step
@@ -722,7 +834,14 @@ class Trainer:
             else:
                 skipped_count += 1
 
-            accumulator.update(logits.detach().float(), targets, loss=float(loss.detach()))
+            # Scored against the ORIGINAL hard labels, never a mixed target, so
+            # training accuracy stays comparable with every historical run and a
+            # mixed epoch's curve means the same thing as an unmixed one's.
+            accumulator.update(
+                logits.detach().float(),
+                mixed.hard_targets,
+                loss=float(loss.detach()),
+            )
             images_seen += int(images.shape[0])
 
         elapsed = time.perf_counter() - started

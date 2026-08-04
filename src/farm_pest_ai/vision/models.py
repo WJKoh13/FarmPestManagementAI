@@ -326,6 +326,45 @@ class _ClassifierMixin(nn.Module):
         pooled = self.flatten(self.pool(features))
         return self.classifier(self.dropout(pooled))
 
+    def _backbone(self, x: Tensor) -> Tensor:
+        """Return the pre-pool feature map. Implemented by each architecture."""
+        raise NotImplementedError
+
+    @property
+    def feature_dim(self) -> int:
+        """Width of the pooled features :meth:`forward_features` returns."""
+        return int(self.classifier.in_features)
+
+    def forward_features(self, x: Tensor) -> Tensor:
+        """Return pooled backbone features of shape ``(N, feature_dim)``.
+
+        This is the embedding path the Phase 8.1 auxiliary objective consumes.
+        It is **separate from** :meth:`forward`, which continues to return raw
+        class logits and is the only thing inference calls. Dropout is
+        deliberately not applied here: the classifier's dropout regularises the
+        classification head, whereas the contrastive term wants the features
+        themselves.
+
+        Returning the same pooled vector the classifier reads is what makes the
+        two objectives share a backbone rather than train two disjoint networks.
+        """
+        self._check_input(x)
+        return self.flatten(self.pool(self._backbone(x)))
+
+    def forward_logits_and_features(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """Return logits and pooled features from **one** backbone pass.
+
+        Training with the auxiliary objective needs both. Calling
+        :meth:`forward` and :meth:`forward_features` separately would run the
+        backbone twice, doubling the step cost for no benefit — and, with
+        stochastic depth and dropout active, would produce features from a
+        *different* random subnetwork than the logits, so the two terms would
+        not describe the same forward pass.
+        """
+        self._check_input(x)
+        pooled = self.flatten(self.pool(self._backbone(x)))
+        return self.classifier(self.dropout(pooled)), pooled
+
 
 class BaselineCNN(_ClassifierMixin):
     """Model A: a plain conv-BN-ReLU stack with max pooling.
@@ -373,10 +412,14 @@ class BaselineCNN(_ClassifierMixin):
         )
         self.apply(init_weights)
 
+    def _backbone(self, x: Tensor) -> Tensor:
+        """Return the pre-pool feature map."""
+        return self.features(x)
+
     def forward(self, x: Tensor) -> Tensor:
         """Return raw logits of shape ``(N, num_classes)``."""
         self._check_input(x)
-        return self._classify(self.features(x))
+        return self._classify(self._backbone(x))
 
 
 class CustomCNN(_ClassifierMixin):
@@ -440,10 +483,14 @@ class CustomCNN(_ClassifierMixin):
         )
         self.apply(init_weights)
 
+    def _backbone(self, x: Tensor) -> Tensor:
+        """Return the pre-pool feature map."""
+        return self.head_act(self.stages(self.stem(x)))
+
     def forward(self, x: Tensor) -> Tensor:
         """Return raw logits of shape ``(N, num_classes)``."""
         self._check_input(x)
-        return self._classify(self.head_act(self.stages(self.stem(x))))
+        return self._classify(self._backbone(x))
 
 
 # -- construction and inspection ----------------------------------------

@@ -1,0 +1,37 @@
+# Phase 8.1 experiment E9a: inverse-square-root class weighting on full102.
+#
+# THE ONE VARIABLE: training.class_weighting none -> inverse_sqrt.
+#
+# Phase 8 deliberately trained full102 with NO imbalance mitigation, so that any
+# rice10-vs-full102 difference was attributable to the task rather than to a
+# second change. That control now exists, and E9 is the follow-up it was set up
+# to enable.
+#
+# full102's training imbalance is 82x — label 72 has 42 images against label
+# 101's 3,444. Full inverse-frequency weighting would therefore hand the rarest
+# class 82x the loss weight of the largest, which on a 42-image class is more
+# likely to produce a high-variance, over-triggered detector than a better one.
+# Inverse-square-root compresses that to ~9x, which is the intended first probe.
+#
+# WEIGHTS COME FROM THE TRAINING SPLIT ONLY. `build_loaders` computes them from
+# the training dataset and raises if the training split was not requested; it
+# never back-fills from validation. The resolved weight vector is recorded in the
+# run summary.
+#
+# SAMPLING IS UNCHANGED, so this stays a loss-weighting experiment. Adding a
+# weighted sampler would change which images the model sees as well as how much
+# each error costs, and the two effects would not be separable.
+#
+# Expect a TRADE-OFF rather than a uniform gain: weighting typically raises tail
+# recall and macro F1 while lowering raw accuracy, because it buys rare-class
+# performance with common-class errors. Reported by validation-support quartile
+# using the Phase 8 grouping.
+#
+# Usage:
+#   scripts/train.py --config model_custom.yaml \
+#       --config exp_full102_e9a_inverse_sqrt.yaml --plan
+
+extends: exp_full102_protocol_a.yaml
+
+training:
+  class_weighting: inverse_sqrt

@@ -375,6 +375,274 @@ def test_phase72_experiments_never_touch_the_test_split(configs_dir: Path) -> No
         assert "test" not in body, f"{experiment} references the test split"
 
 
+#: The Phase 8.1 rice10 screening arms, each with the single dotted key it is
+#: allowed to change relative to the E0 control. Mixing and fine-grained are
+#: nested sections, so the whole subtree is named and every leaf under it must
+#: fall inside.
+PHASE81_RICE10_EXPERIMENTS = {
+    "exp_rice10_e6a_lr0008.yaml": "training.learning_rate",
+    "exp_rice10_e6b_lr0030.yaml": "training.learning_rate",
+    "exp_rice10_e6c_wd010.yaml": "training.weight_decay",
+    "exp_rice10_e7a_mixup.yaml": "training.mixing",
+    "exp_rice10_e7b_cutmix.yaml": "training.mixing",
+    "exp_rice10_e8_supcon.yaml": "training.fine_grained",
+}
+
+#: The Phase 8.1 full102 arms, against the Phase 8 full102 control, each with the
+#: dotted keys it may change. E9b names beta as well: beta is part of the
+#: `effective` scheme's definition rather than a second variable, since
+#: "effective" without a stated beta is not a fully specified treatment.
+PHASE81_FULL102_EXPERIMENTS: dict[str, set[str]] = {
+    "exp_full102_e9a_inverse_sqrt.yaml": {"training.class_weighting"},
+    "exp_full102_e9b_effective.yaml": {
+        "training.class_weighting",
+        "training.class_weighting_beta",
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("experiment", "expected_key"), sorted(PHASE81_RICE10_EXPERIMENTS.items())
+)
+def test_phase81_rice10_arms_change_exactly_one_variable(
+    configs_dir: Path, experiment: str, expected_key: str
+) -> None:
+    """Each Phase 8.1 rice10 arm differs from E0 in one conceptual field only."""
+    control = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_rice10_protocol_a.yaml"),
+        ]
+    )
+    variant = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, experiment),
+        ]
+    )
+
+    control_flat = _flatten(control.to_dict())
+    variant_flat = _flatten(variant.to_dict())
+    differences = {
+        key
+        for key in set(control_flat) | set(variant_flat)
+        if control_flat.get(key) != variant_flat.get(key)
+        and "config_sources" not in key
+    }
+
+    stray = {key for key in differences if not key.startswith(expected_key)}
+    assert not stray, (
+        f"{experiment} also changes {sorted(stray)}, beyond {expected_key!r}"
+    )
+    assert differences, f"{experiment} changes nothing relative to the control"
+    assert variant.num_classes == control.num_classes == 10
+
+
+@pytest.mark.parametrize(
+    ("experiment", "expected_keys"),
+    sorted(PHASE81_FULL102_EXPERIMENTS.items()),
+    ids=sorted(PHASE81_FULL102_EXPERIMENTS),
+)
+def test_phase81_full102_arms_change_exactly_one_variable(
+    configs_dir: Path, experiment: str, expected_keys: set[str]
+) -> None:
+    """Each E9 arm differs from the control only in its weighting treatment."""
+    control = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_full102_protocol_a.yaml"),
+        ]
+    )
+    variant = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, experiment),
+        ]
+    )
+
+    control_flat = _flatten(control.to_dict())
+    variant_flat = _flatten(variant.to_dict())
+    differences = {
+        key
+        for key in set(control_flat) | set(variant_flat)
+        if control_flat.get(key) != variant_flat.get(key)
+        and "config_sources" not in key
+    }
+
+    assert differences == expected_keys, (
+        f"{experiment} changes {sorted(differences)}, not {sorted(expected_keys)}"
+    )
+    assert variant.num_classes == control.num_classes == 102
+
+
+def test_phase81_experiments_never_touch_the_test_split(configs_dir: Path) -> None:
+    """No Phase 8.1 config may name the test split in any form."""
+    for experiment in (
+        *PHASE81_RICE10_EXPERIMENTS,
+        *PHASE81_FULL102_EXPERIMENTS,
+    ):
+        text = config_path(configs_dir, experiment).read_text(encoding="utf-8")
+        body = "\n".join(
+            line for line in text.splitlines() if not line.strip().startswith("#")
+        )
+        assert "test" not in body, f"{experiment} references the test split"
+
+
+def test_phase81_e7_arms_keep_label_smoothing_at_the_control_value(
+    configs_dir: Path,
+) -> None:
+    """MixUp/CutMix must not silently retune smoothing at the same time.
+
+    Both are target-softening mechanisms, so it is tempting to reduce smoothing
+    when adding mixing. Doing so would make E7 a two-variable experiment, which
+    the phase brief forbids explicitly.
+    """
+    control = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_rice10_protocol_a.yaml"),
+        ]
+    )
+    expected = control.get("training.label_smoothing")
+    assert expected == 0.1
+
+    for experiment in ("exp_rice10_e7a_mixup.yaml", "exp_rice10_e7b_cutmix.yaml"):
+        variant = load_config(
+            [
+                config_path(configs_dir, "model_custom.yaml"),
+                config_path(configs_dir, experiment),
+            ]
+        )
+        assert variant.get("training.label_smoothing") == expected, (
+            f"{experiment} changed label smoothing as well as mixing"
+        )
+
+
+def test_phase81_e9_arms_leave_sampling_unchanged(configs_dir: Path) -> None:
+    """E9 is a loss-weighting experiment, not a resampling one.
+
+    Weighting changes what an error costs; a weighted sampler changes which
+    images the model sees. Doing both at once makes the two effects
+    inseparable.
+    """
+    control = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_full102_protocol_a.yaml"),
+        ]
+    )
+    for experiment in PHASE81_FULL102_EXPERIMENTS:
+        variant = load_config(
+            [
+                config_path(configs_dir, "model_custom.yaml"),
+                config_path(configs_dir, experiment),
+            ]
+        )
+        assert variant.get("runtime.sampler") == control.get("runtime.sampler")
+        assert variant.get("training.sampler") == control.get("training.sampler")
+
+
+def test_phase81_e9_avoids_full_inverse_frequency_in_the_first_screen(
+    configs_dir: Path,
+) -> None:
+    """At 82x imbalance, plain inverse weighting is too aggressive to screen first.
+
+    Pinned so the choice reads as deliberate rather than accidental.
+    """
+    schemes = {
+        experiment: load_config(
+            [
+                config_path(configs_dir, "model_custom.yaml"),
+                config_path(configs_dir, experiment),
+            ]
+        ).get("training.class_weighting")
+        for experiment in PHASE81_FULL102_EXPERIMENTS
+    }
+    assert set(schemes.values()) == {"inverse_sqrt", "effective"}
+    assert "inverse" not in schemes.values()
+
+
+def test_phase81_e9b_beta_brackets_the_space_rather_than_maxing_it(
+    configs_dir: Path,
+) -> None:
+    """E9b must be meaningfully weaker than full inverse weighting.
+
+    At the library default beta of 0.9999 the effective scheme reaches a 69.5x
+    weight ratio on full102 against full inverse weighting's 82x — nearly as
+    aggressive as the option E9 excludes for being too aggressive, leaving the
+    two arms clustered at one end. beta 0.999 puts E9b at ~23.5x, between E9a's
+    ~9.1x and the 82x ceiling, which is what makes the pair a real bracket.
+
+    Verified against the real training distribution, not a synthetic one.
+    """
+    pytest.importorskip("torch")
+    import csv
+
+    from farm_pest_ai.data.dataset import class_weights
+
+    manifest = (
+        Path(__file__).resolve().parents[1]
+        / "data"
+        / "processed"
+        / "full102"
+        / "train.csv"
+    )
+    if not manifest.is_file():
+        pytest.skip("full102 derived manifest is not built")
+
+    config = load_config(
+        [
+            config_path(configs_dir, "model_custom.yaml"),
+            config_path(configs_dir, "exp_full102_e9b_effective.yaml"),
+        ]
+    )
+    beta = config.get("training.class_weighting_beta")
+    assert beta == pytest.approx(0.999)
+
+    with manifest.open(encoding="utf-8") as handle:
+        targets = [int(row["project_label"]) for row in csv.DictReader(handle)]
+
+    weights = class_weights(targets, 102, scheme="effective", beta=float(beta))
+    ratio = max(weights) / min(weights)
+    inverse = class_weights(targets, 102, scheme="inverse")
+    inverse_ratio = max(inverse) / min(inverse)
+    gentle = class_weights(targets, 102, scheme="inverse_sqrt")
+    gentle_ratio = max(gentle) / min(gentle)
+
+    # ~23.5x, strictly between the two flanking arms and well under the ceiling.
+    assert 20.0 < ratio < 28.0
+    assert gentle_ratio < ratio < inverse_ratio
+    assert ratio < inverse_ratio / 2.0
+    # Normalisation keeps the loss magnitude comparable to an unweighted run.
+    assert sum(weights) / len(weights) == pytest.approx(1.0)
+
+
+def test_mixing_and_fine_grained_are_absent_from_every_historical_config(
+    configs_dir: Path,
+) -> None:
+    """Pre-Phase-8.1 configs must resolve to the disabled path exactly.
+
+    The E7 and E8 features are opt-in; if any historical config picked them up,
+    a rerun of an earlier experiment would no longer reproduce its result.
+    """
+    from farm_pest_ai.vision.training import training_config_from_config
+
+    historical = (
+        "exp_rice10_protocol_a.yaml",
+        "exp_full102_protocol_a.yaml",
+        "exp_rice10_e1_epochs100.yaml",
+        "exp_rice10_e2_224.yaml",
+        "exp_rice10_e3_crop08.yaml",
+    )
+    for name in historical:
+        config = load_config(
+            [config_path(configs_dir, "model_custom.yaml"), config_path(configs_dir, name)]
+        )
+        resolved = training_config_from_config(config)
+        assert resolved.mixing.method == "none", f"{name} enables mixing"
+        assert resolved.fine_grained.method == "none", f"{name} enables an aux loss"
+
+
 def test_the_shipped_baseline_is_not_the_model_config_default(configs_dir: Path) -> None:
     """The shipped baseline is three stages, not the four-stage default.
 

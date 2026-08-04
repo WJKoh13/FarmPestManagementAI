@@ -99,6 +99,83 @@ Recorded honestly as they are discovered, not only at the end.
   `runtime.num_workers` changes how the per-worker RNG streams interleave and
   therefore the exact augmentations drawn.
 
+## Accuracy limitations (Phase 8.1)
+
+**Full-coverage accuracy is ~60% on both scopes, and nine experiments failed to
+move it.** Phase 8.1 tried five standard techniques across nine arms — test-time
+augmentation, ensembling, learning-rate retuning, MixUp, CutMix, supervised
+contrastive learning and two class-weighting schemes. **Not one beat its
+control**, the best landing at −0.0012. The plateau is therefore a property of
+the architecture and data rather than an untuned hyperparameter, and the
+remaining levers are the abstention policy, more or better data, or a different
+architecture — none of which Phase 8.1 was scoped to try.
+
+**The original inference-time finding, which the training arms then confirmed:** rice10 validation accuracy is 0.6103 and full102 is ~0.5976. E5
+tested the two inference-time options that cost no training at all — test-time
+augmentation and ensembling — and **both failed**:
+
+- Deterministic horizontal-flip TTA: **−0.0043** mean macro F1 across six paired
+  rice10 checkpoints, positive on only 2 of 6, and −0.0021 on full102.
+- Uniform ensembling: no ensemble beat its own best member by more than +0.0032,
+  and the 224px and mixed-resolution ensembles were **worse** than their best
+  member by −0.0150 and −0.0192.
+
+Every remaining route to higher accuracy therefore requires retraining, which is
+both more expensive and less certain. If E6–E9 also land inside noise, the honest
+conclusion is that ~0.60 is close to this architecture's ceiling on this data,
+and the product answer is the abstention policy rather than a better headline
+number.
+
+**70% accuracy has not been achieved at full coverage, and must not be claimed
+from the selective figures.** Both models already exceed 70% accuracy *among
+answered predictions* at confidence 0.5 — rice10 70.7% at 78.9% coverage,
+full102 76.3% at 67.0% coverage — but that is a different quantity. A selective
+figure without its coverage is not a meaningful accuracy claim.
+
+**The accuracy/coverage trade-off is real and unavoidable.** At threshold 0.7
+full102 answers half the time at ~84.6% accuracy and defers the rest. That is a
+defensible product, but it means roughly half of user queries return "uncertain"
+rather than an identification, and the deferred half is exactly the harder,
+more ambiguous images a user is most likely to need help with.
+
+**Four of the seven training arms are unresolved, not refuted.** E6a, E6b, E7a
+and E8 all landed inside the ±0.02 band that E4 showed can reverse across seeds,
+so the screen rules out a large effect but cannot distinguish a small real loss
+from noise. Only E7b (−0.0769) is unambiguously worse. Screening was seed 1337
+only. E4 established that a rice10 margin under ~0.02 can shrink by
+43% and reverse across seeds, and risk 34 established that three seeds cannot
+resolve a ~0.008 gap at all. The screen can promote a candidate for confirmation;
+it cannot confirm one. Any arm landing inside ±0.02 is unresolved, not a small
+win.
+
+**The accuracy the metric measures and the accuracy users experience may differ.**
+E7a MixUp lost macro F1 (−0.0180) while improving validation loss, top-5 and
+selective accuracy — 87.0% among answered predictions at threshold 0.7, against
+the control's 77.5%. For an abstention-based product that is the metric that
+matters, and the phase's primary metric did not reward it. This is recorded as an
+open question for Phase 9's uncertainty policy, not as a proposed change.
+
+**The auxiliary objective's hyperparameters are published defaults, not tuned
+values.** Weight 0.1 and temperature 0.07 were not selected on this data, which
+is the same situation risk 22 records for the learning rate. A negative E8 result
+is evidence about that specific setting, not about contrastive learning on this
+task.
+
+**full102 imbalance mitigation is a trade, not a fix.** E9a moved +0.0141 on the
+rarest support quartile and −0.0140 on the largest, at roughly 1:1, with balanced
+accuracy +0.0204 against raw accuracy −0.0136. No setting avoids the trade, and
+the stronger E9b arm was worse on every quartile. Whether to accept it is a
+product decision about rare-pest recall versus common-pest accuracy; macro F1
+will not decide it.
+
+**E9 screened two points on a wide continuum.** `inverse_sqrt` gives a 9.06x
+weight ratio and `effective` at beta 0.999 gives 23.53x, against full inverse
+weighting's 82x. Beta was made configurable and set to 0.999 precisely so the
+second arm brackets rather than duplicates the excluded extreme — at the library
+default it would have been 69.5x. Two points still cannot map the curve: if both
+arms help, the optimum between or beyond them is unmeasured, and a third arm
+would be needed to locate it.
+
 ## To be added
 
 Populated in later phases: architecture limitations (6-8), final model error

@@ -416,6 +416,70 @@ def test_class_weights_are_absent_by_default(project: Config) -> None:
     assert build_loaders(project, ("train", "validation")).class_weights is None
 
 
+def test_class_weighting_beta_reaches_the_weight_vector(project: Config) -> None:
+    """Beta is plumbed from configuration through to the derived weights.
+
+    Phase 8.1's E9b depends on this: without the passthrough, `effective` would
+    silently always use the library default of 0.9999 no matter what the config
+    said, and the arm would run at 69.5x instead of the intended 23.5x.
+    """
+    bundles = {}
+    for beta in (0.999, 0.9999):
+        config = load_config(
+            "base.yaml",
+            overrides={
+                **project.to_dict(),
+                "training": {
+                    **project.section("training"),
+                    "class_weighting": "effective",
+                    "class_weighting_beta": beta,
+                },
+            },
+        )
+        bundle = build_loaders(config, ("train", "validation"))
+        assert bundle.class_weights is not None
+        bundles[beta] = bundle
+
+    gentle = bundles[0.999].class_weights
+    strong = bundles[0.9999].class_weights
+    assert gentle is not None and strong is not None
+    # The two betas must produce genuinely different corrections.
+    assert gentle != pytest.approx(strong)
+    assert max(strong) / min(strong) > max(gentle) / min(gentle)
+
+
+def test_class_weighting_beta_is_recorded_in_the_bundle(project: Config) -> None:
+    """A run's summary states the beta its weights came from."""
+    config = load_config(
+        "base.yaml",
+        overrides={
+            **project.to_dict(),
+            "training": {
+                **project.section("training"),
+                "class_weighting": "effective",
+                "class_weighting_beta": 0.999,
+            },
+        },
+    )
+    described = build_loaders(config, ("train", "validation")).describe()
+
+    assert described["class_weighting"] == "effective"
+    assert described["class_weighting_beta"] == pytest.approx(0.999)
+
+
+def test_class_weighting_beta_defaults_to_the_library_value(project: Config) -> None:
+    """A config naming only the scheme behaves exactly as it did before."""
+    config = load_config(
+        "base.yaml",
+        overrides={
+            **project.to_dict(),
+            "training": {**project.section("training"), "class_weighting": "effective"},
+        },
+    )
+    bundle = build_loaders(config, ("train", "validation"))
+    assert bundle.describe()["class_weighting_beta"] == pytest.approx(0.9999)
+
+
 def test_class_weighting_without_the_training_split_is_refused(
     project: Config,
 ) -> None:

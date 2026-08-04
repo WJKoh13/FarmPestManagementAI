@@ -4,8 +4,9 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 
 | Field | Value |
 | --- | --- |
-| Current phase completed | **Phase 8 complete — figures rendered, scope recommended** |
-| Next phase | Phase 9 freeze and final evaluation (**awaiting scope approval**) |
+| Current phase completed | **Phase 8.1 Stage 1 complete — E5–E9 all run; no arm beat its control** |
+| Next phase | **Awaiting direction** — confirmation, combined recipes and Phase 9 all require explicit approval |
+| Phase 8.1 verdict | **All 9 experiments negative.** E5 (TTA/ensembles), E6a/b (lr), E7a/b (MixUp/CutMix), E8 (SupCon), E9a/b (weighting). Best arm −0.0012. E0 and the Phase 8 protocol survive unchanged |
 | Scope recommendation | **`rice10`** — on knowledge-base feasibility and rare-class measurement, not on any macro F1 ranking |
 | Phase 8 result | `custom_cnn` **0.5443** vs `baseline_cnn` 0.4258 full102 validation macro F1 (+0.1185, single seed) |
 | Image review | 5,039 rice10 images queued (train + validation); **0 human decisions entered** |
@@ -18,7 +19,7 @@ Experimental branch: `zy_CNN`. Updated at the end of every phase.
 | Dependencies installed | **Yes** — `.venv`, base + `train` + `dev`; `app` deferred to Phase 12 |
 | Interpreter | Official CPython 3.12.5 (`win-amd64`) in `.venv` |
 | PyTorch | `2.13.0+cu126`, CUDA available, cuDNN 91002 |
-| Test suite | 752 passed (636 through Phase 7, plus 116 in Phase 7.1–7.3) |
+| Test suite | **906 passed** (760 through Phase 8, plus 146 in Phase 8.1) |
 | Lint / types | `ruff` clean, `mypy` clean |
 | Models (as shipped) | `baseline_cnn` 1.15M params, `custom_cnn` 1.44M params (rice10) |
 | Source data | Unmodified, read-only (reverified: 75,222 images, 2020 timestamps) |
@@ -1009,6 +1010,377 @@ every discovered run, contradicting its own comment that later phases would add
 run directories. It now asserts the scope is a *known* one; the two scopes' metrics
 are still never combined. The suite is **760 passing**, `ruff` and `mypy` clean.
 
+### Phase 8.1 — accuracy and generalization improvements (Stage 1 complete; **all nine experiments negative**)
+
+Authorized by the user between Phases 8 and 9. **Phase 9 remains pending.** No
+training run was launched: the phase brief authorizes infrastructure, tests,
+validation-only inference and planning, and requires explicit approval before any
+full training. The test split was not accessed, constructed, inspected or scored
+at any point.
+
+#### E5 — ensembling and test-time augmentation (complete; **negative**)
+
+Inference only, over 15 rice10 arms and 3 full102 arms on the validation split.
+No checkpoint was modified and no model was retrained.
+
+**Result: neither TTA nor uniform ensembling is adopted.** Both were measured
+properly and both failed to earn their cost.
+
+**Deterministic horizontal-flip TTA does not help, and mostly hurts.** Paired
+against the same six rice10 checkpoints:
+
+| arm | single | +hflip | Δ |
+| --- | --- | --- | --- |
+| 160 seed 1337 | 0.5904 | 0.5980 | **+0.0076** |
+| 160 seed 2024 | 0.5916 | 0.5820 | −0.0096 |
+| 160 seed 7 | 0.5979 | 0.5914 | −0.0065 |
+| 224 seed 1337 | 0.6052 | 0.5980 | −0.0071 |
+| 224 seed 2024 | 0.6121 | 0.6125 | +0.0004 |
+| 224 seed 7 | 0.5895 | 0.5789 | −0.0106 |
+| **mean** | | | **−0.0043 ± 0.0070** |
+
+Positive on **2 of 6**, mean negative, and every individual delta is inside the
+±0.01 noise threshold. On full102 the same picture: macro F1 −0.0021 and balanced
+accuracy −0.0039, against accuracy +0.0035 — the metric that matters moves the
+wrong way. This is a real result rather than a null one: horizontal flip is
+usually a safe TTA, and it failing here suggests the training-time flip
+augmentation (p=0.5) has already extracted that invariance, leaving nothing for
+the inference-time average to add.
+
+**Uniform ensembling does not beat the best single member.**
+
+| ensemble | member mean | best member | ensemble | vs mean | vs best |
+| --- | --- | --- | --- | --- | --- |
+| 160px x3 | 0.5933 | 0.5979 | 0.6011 | +0.0078 | **+0.0032** |
+| 224px x3 | 0.6023 | 0.6121 | 0.5971 | −0.0052 | **−0.0150** |
+| 160+224 x6 | 0.5978 | 0.6121 | 0.5929 | −0.0049 | **−0.0192** |
+
+Only the 160px group beat its own member mean, and even there it beat the *best*
+member by +0.0032 — a third of the noise threshold. The 224px and combined
+ensembles were **worse than their best member**, which is the expected outcome
+when uniform weights average a strong member with weaker ones. Tuning weights to
+fix this was deliberately not done: fitting weights on the same validation split
+that then judges the ensemble measures the split, not the method.
+
+**The combined 160+224 ensemble was built correctly and still lost.** Each member
+was scored through its own recorded preprocessing — fingerprints `9e75177ab60f96e0`
+at 160 and `3378a6f0570336b3` at 224, verified against each checkpoint under
+`strict_preprocessing=True` — and alignment was proven by comparing target
+vectors, not assumed from loader order. So its −0.0192 is a genuine result about
+uniform ensembling, not an artifact of a broken pipeline.
+
+**`best.pt` is not the corrected-metric optimum, confirmed independently.**
+Scoring `rice10_custom_e4_s160_seed1337/best.pt` gave **0.5904** against the
+0.5913 recorded at epoch 60, because that checkpoint holds **epoch 58** — the
+epoch the defective Phase 7.1 metric selected. This reproduces risk 25 from a
+completely different direction and is exactly why the E5 report records each
+member's epoch and refuses to assume `best.pt` holds the numerically best epoch.
+
+**The full102 baseline was not ensembled with the custom model.** It is reported
+as a standalone reference (macro F1 0.4244) only. Uniformly averaging a 0.4244
+member into a 0.5444 one is as likely to hurt as help, and the phase requires a
+validation-based reason before evaluating such a pairing at all.
+
+Selective accuracy was recorded at every threshold for every arm and is kept in a
+block separate from full-coverage metrics, so the two can never be conflated.
+
+Reports: `data/reports/phase81_e5_rice10.json`, `phase81_e5_full102.json`, each
+carrying every member's checkpoint SHA-256, epoch, fingerprint and image size.
+
+#### Stage 1 rice10 screening — E6a, E6b, E7a, E7b, E8 (complete; **all negative**)
+
+Five arms, seed 1337, one conceptual variable each, `custom_cnn` under the E0
+protocol as control. Every arm ran to completion with 0 AMP skipped steps. **No
+arm beat the control on either reading.**
+
+| arm | variable | macro F1 | Δ | last-10 mean ± sd | accuracy | balanced acc | best ep | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **E0** | *control* | **0.5913** | — | 0.5832 ± 0.0049 | **0.6103** | 0.5885 | 60 | control |
+| E6a | lr → 0.0008 | 0.5747 | −0.0166 | 0.5711 ± 0.0024 | 0.5964 | 0.5740 | 57 | unresolved |
+| E6b | lr → 0.0030 | 0.5874 | −0.0039 | 0.5792 ± 0.0043 | 0.6047 | 0.5878 | 56 | indistinguishable |
+| E7a | MixUp α 0.2 | 0.5734 | −0.0180 | 0.5612 ± 0.0053 | 0.5908 | 0.5669 | 36 | unresolved |
+| E7b | CutMix α 1.0 | 0.5144 | **−0.0769** | 0.5050 ± 0.0046 | 0.5437 | 0.5107 | 48 | **worse** |
+| E8 | SupCon w 0.1 | 0.5731 | −0.0183 | 0.5634 ± 0.0043 | 0.5895 | 0.5693 | 40 | unresolved |
+
+Both readings agree in every case — no arm's peak and late-run mean disagree in
+sign — so unlike E4 these verdicts do not depend on which is used. Only E7b
+exceeds the 0.02 seed-noise threshold, and it does so in the **wrong direction**.
+The other four sit inside it, which under the phase's own rule means *unresolved*,
+not "slightly worse". No candidate advances to confirmation.
+
+**E6: the shared midpoint was already near-optimal.** Both directions lost —
+0.0008 by −0.0166 and 0.0030 by −0.0039 — so 0.0015 sits near the top of a flat
+region rather than on a slope. **Risk 22 is substantially answered**: the
+midpoint chosen to make the Phase 7 architecture comparison controlled was not
+costing `custom_cnn` measurable accuracy. E6b is the closest arm to the control
+of the five, and its best epoch (56) and last-10 sd match E0's closely.
+
+**Stage 2 (E6c, weight decay) is therefore NOT triggered.** The gate was a
+meaningful stage-1 winner; there is none. Running it would test a second knob
+against a control whose first knob is already at its optimum.
+
+**E7a MixUp: worse top-1, better calibration.** Macro F1 −0.0180, but it posts
+the **lowest validation loss of any arm** (1.5135 against E0's 1.5989) and the
+**highest top-5** (0.8946 against 0.8821). It is not failing to learn — it is
+learning a smoother, better-calibrated posterior that is less sharp at rank 1.
+Its selective curve is the most aggressive of the six: at threshold 0.7 it
+answers 37.4% of the split at **87.0%** accuracy, against E0's 58.5% at 77.5%.
+For a system whose product answer is an abstention policy, that trade is worth
+recording even though the arm loses on the primary metric.
+
+**E7b CutMix is the only clearly harmful arm** at −0.0769. On a dataset where
+Phase 7.3's contact sheets showed many images are already tiny-subject or
+partial-view frames, pasting a rectangle over the subject appears to destroy
+evidence rather than teach robustness to occlusion. The hypothesis that
+occlusion-style augmentation suits this data is answered negatively.
+
+**E8 failed on the exact groups it was built for**, which is the most decisive
+result of the five. The auxiliary objective exists to separate the documented
+confusion groups, and it made **all three worse**:
+
+| confusion group | E0 mean F1 | E8 mean F1 | Δ |
+| --- | --- | --- | --- |
+| plant hoppers (brown / white-backed / small brown) | 0.4706 | 0.4666 | −0.0040 |
+| borers (asiatic / yellow rice) | 0.6152 | 0.5849 | −0.0303 |
+| leaf roller vs leaf caterpillar | 0.5793 | 0.5371 | −0.0422 |
+
+A macro-average loss could have hidden a real gain concentrated in six classes;
+this shows there was none to hide. Per risk 40 this is evidence about **this
+setting** — weight 0.1, temperature 0.07, both published defaults — not about
+contrastive learning on this task, and the batch-composition argument that
+motivated the method (~7 positives per anchor) remains sound. But the direction
+gives no reason to spend further compute tuning it before Phase 9.
+
+**Reading the train-validation gaps.** E0's gap is 0.2738 (train 0.8841 against
+validation 0.6103). E6a narrowed it to 0.2187 and E8 to 0.2212 — both by fitting
+the training set *less* rather than generalising better, since validation fell in
+both cases. **E7a and E7b's gaps are not comparable** and are flagged as such in
+the report: their training accuracy is measured on blended images against hard
+labels, so E7a's −0.2144 describes the difficulty of the augmented images, not a
+model that generalises better than it fits.
+
+| arm | train acc | val acc | gap | comparable? |
+| --- | --- | --- | --- | --- |
+| E0 | 0.8841 | 0.6103 | 0.2738 | yes |
+| E6a | 0.8151 | 0.5964 | 0.2187 | yes |
+| E6b | 0.8785 | 0.6047 | 0.2738 | yes |
+| E7a | 0.3764 | 0.5908 | −0.2144 | **no — mixed images** |
+| E7b | 0.4585 | 0.5437 | −0.0852 | **no — mixed images** |
+| E8 | 0.8106 | 0.5895 | 0.2212 | yes |
+
+**Nothing closed the gap while raising validation accuracy**, which was the
+phase's actual objective.
+
+**Selective accuracy, all six arms** (coverage / accuracy among answered):
+
+| arm | @0.5 | @0.7 | @0.9 |
+| --- | --- | --- | --- |
+| E0 | 78.9% / 70.7% | 58.5% / 77.5% | 24.7% / 88.8% |
+| E6a | 73.6% / 70.2% | 52.4% / 79.4% | 26.5% / 89.0% |
+| E6b | 81.6% / 67.2% | 61.6% / 74.5% | 28.6% / 89.3% |
+| E7a | 59.4% / **76.4%** | 37.4% / **87.0%** | 11.2% / **91.4%** |
+| E7b | 43.8% / **81.6%** | 23.2% / **92.2%** | 3.2% / 95.7% |
+| E8 | 72.4% / 70.5% | 50.5% / 79.9% | 24.3% / 90.9% |
+
+The mixed arms buy selective accuracy with coverage, exactly as expected from a
+smoother posterior. E7b at threshold 0.7 answers under a quarter of the split.
+**None of these is full-coverage accuracy**, and no arm improved that.
+
+Every arm: 0 classes never predicted, peak VRAM 857.6–876.1 MiB, runtime
+5.1–5.9 min, 844–958 img/s. Runs are `rice10_custom_e6a_lr0008`,
+`e6b_lr0030`, `e7a_mixup`, `e7b_cutmix`, `e8_supcon`. Report:
+`data/reports/phase81_stage1_rice10.json`.
+
+#### Stage 1 full102 screening — E9a, E9b (complete; **no gain, and the trade-off is real**)
+
+Two loss-weighting arms against the unchanged Phase 8 control, seed 1337,
+sampling unchanged, weights derived from the training split only.
+
+| arm | weighting | ratio | macro F1 | Δ | last-10 mean ± sd | accuracy | balanced acc | best ep | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **E0-102** | none | — | **0.5443** | — | 0.5410 ± 0.0031 | **0.5976** | 0.5231 | 54 | control |
+| E9a | `inverse_sqrt` | 9.06x | 0.5431 | −0.0012 | 0.5384 ± 0.0043 | 0.5840 | **0.5435** | 60 | indistinguishable |
+| E9b | `effective` β 0.999 | 23.53x | 0.5286 | −0.0157 | 0.5258 ± 0.0152 | 0.5706 | **0.5444** | 58 | unresolved |
+
+**Neither arm improved macro F1**, the selection metric. E9a is within 0.0012 —
+indistinguishable — and E9b is 0.0157 below, inside the 0.02 seed-noise band and
+therefore unresolved rather than proven worse.
+
+**But both raised balanced accuracy while lowering raw accuracy, which is exactly
+the trade-off the phase said to report as a trade-off rather than an improvement:**
+
+| arm | balanced accuracy | raw accuracy |
+| --- | --- | --- |
+| E0-102 | 0.5231 | 0.5976 |
+| E9a | **+0.0204** (0.5435) | **−0.0136** (0.5840) |
+| E9b | **+0.0213** (0.5444) | **−0.0270** (0.5706) |
+
+Weighting is doing what it is supposed to do — spreading performance more evenly
+across classes — but macro F1 does not reward it, because the recall gained on
+rare classes is paid for in precision lost when the model over-predicts them.
+
+**By validation-support quartile** (Phase 8 grouping; the control's figures
+reproduce Phase 8's published 0.4767 / 0.5859 / 0.5544 / 0.5589 exactly, which
+confirms the methodology matches):
+
+| arm | Q1 rarest (7–26) | Q2 (26–47) | Q3 (48–80) | Q4 largest (82–573) |
+| --- | --- | --- | --- | --- |
+| E0-102 | 0.4767 | 0.5859 | 0.5544 | 0.5589 |
+| E9a | **+0.0141** | −0.0035 | −0.0003 | **−0.0140** |
+| E9b | −0.0094 | −0.0144 | −0.0080 | **−0.0298** |
+
+**E9a is the clean demonstration**: it gains on the rarest quartile and loses an
+almost identical amount on the largest, with the middle two unchanged. That is a
+redistribution, not an improvement — the model is trading common-class accuracy
+for rare-class accuracy at roughly 1:1.
+
+**E9b's stronger 23.53x correction over-corrects**: it loses on *every* quartile
+including the rarest, while still posting the highest balanced accuracy. Pushing
+past ~9x buys nothing on this task. Since E9a (9.06x) is the gentler arm and the
+only one to help the tail at all, the evidence points **away** from stronger
+weighting, not toward it — so full inverse-frequency weighting at 82x is now
+firmly excluded rather than merely deferred, and no third arm is proposed.
+
+**Neither arm left any class unpredicted** (control also 0), so the risk-6 tail
+collapse remains absent with or without weighting.
+
+**Selective accuracy** (coverage / accuracy among answered):
+
+| arm | @0.5 | @0.7 | @0.9 |
+| --- | --- | --- | --- |
+| E0-102 | 67.0% / 76.3% | 50.3% / **84.6%** | 24.8% / **92.7%** |
+| E9a | 57.0% / 79.3% | 36.6% / 85.8% | 13.0% / 89.6% |
+| E9b | 47.4% / **81.6%** | 25.8% / 86.1% | 8.8% / 91.0% |
+
+The weighted arms answer less often for a similar answered-accuracy, and at
+threshold 0.9 both are *worse* than the control on both axes. **The control
+remains the best abstention policy**, which matters because that policy is the
+project's realistic product answer.
+
+Both arms: peak VRAM 858.3 MiB, ~49–50 min, AMP skipped steps 17 (E9a) and 14
+(E9b) out of 42,240 — consistent with the control's 16 and with the shared
+scaling policy rather than with weighting. E9a peaked at epoch 60, still
+improving at the cap, so its figure is a floor.
+
+#### The E9b crash and restart
+
+E9b's first attempt was lost at **epoch 28/60** to a machine freeze and crash —
+the **third** long-run loss on this hardware (risk 24). The mitigation held
+again: 28 epochs of `metrics.jsonl` with **zero corrupt lines**, and both
+`best.pt` and `last.pt` loading cleanly with correct provenance.
+
+It was **restarted from scratch rather than resumed**, following the Phase 8
+precedent: resuming restarts the dataloader RNG stream mid-run (risk 14), which
+would have made E9b non-comparable with E9a and the control.
+
+**The restart reproduced the lost run bit-identically** — max |delta| of
+**0.000000000000** in validation macro F1 across the overlapping epochs. The
+partial run is preserved at
+`artifacts/checkpoints/full102_custom_e9b_effective_interrupted_ep28/` and
+excluded from the comparison. This is the third independent confirmation of
+end-to-end reproducibility, and the second on `full102`.
+
+#### Stage 1 verdict
+
+**Seven arms, zero improvements.** Nothing advances to confirmation, and no
+combined recipe is proposed — combining arms that individually failed has no
+evidential basis.
+
+| scope | arms | best result |
+| --- | --- | --- |
+| rice10 | E6a, E6b, E7a, E7b, E8 | E6b at −0.0039 (indistinguishable) |
+| full102 | E9a, E9b | E9a at −0.0012 (indistinguishable) |
+
+Combined with E5's negative inference-time result, **every one of the nine
+Phase 8.1 experiments failed to beat its control.** The E0 recipe and the Phase 8
+full102 protocol both survive unchanged, which is itself a substantive finding:
+the Phase 7/8 configurations are not obviously improvable by any of the five
+standard techniques tried, and the ~0.60 validation accuracy plateau appears to
+be a property of the architecture and data rather than of an untuned knob.
+
+**Stage 2 (E6c, weight decay) is not triggered** — its gate was a meaningful
+stage-1 learning-rate winner, and both directions lost.
+
+**Run hygiene verified for all seven arms**: splits exactly
+`['train', 'validation']` with no test loader, seed 1337, preprocessing
+fingerprint `9e75177ab60f96e0`, and exactly the intended variable enabled in
+each. Reports: `data/reports/phase81_stage1_rice10.json`,
+`phase81_stage1_full102.json`.
+
+#### E6–E9 — the infrastructure these arms run on
+
+**New — `training.mixing`** (E7). Configuration-controlled MixUp and CutMix,
+`method: none` by default so every historical config resolves to the pre-E7 path
+exactly. Training-only: applying it outside a training pass raises. Metrics are
+accumulated against the **original hard labels**, so a mixed run's curves stay
+comparable with E0's. **CutMix corrects lambda from the actual clipped box area**
+— the box centre is uniform so boxes routinely clip at an edge, and the
+uncorrected lambda would supervise a blend the pixels do not show. Draws come
+from a generator seeded off the run seed, which a test proves does not disturb
+the global RNG stream the dataloader consumes.
+
+**New — `training.fine_grained`** (E8). Supervised contrastive loss on a
+projected embedding, `method: none` by default. **Chosen over triplet margin loss
+on measured batch composition**: at batch size 64 the real rice10 training
+distribution yields ~9.94 of 10 classes per batch and **~7 same-class partners
+per anchor**, so SupCon consumes every positive without any sampler change —
+which matters, because adding balanced sampling would make E8 a two-variable
+experiment. On full102 the same batch gives only ~1.68 positives per anchor,
+which is why E8 screens on rice10 first.
+
+**The inference contract is unchanged.** `forward()` still returns raw class
+logits. `forward_features()` and `forward_logits_and_features()` are separate
+paths, and the projection head is **not part of the model's `state_dict`**, so an
+E8 checkpoint loads into the ordinary inference path with no special case. A test
+pins that.
+
+**E9 needs no new loss.** The existing training-derived `class_weights` already
+implements both required schemes. Verified on the real training split:
+
+| scheme | min weight | max weight | ratio | mean |
+| --- | --- | --- | --- | --- |
+| `inverse_sqrt` (E9a) | 0.2597 | 2.3518 | **9.06x** | 1.0000 |
+| `effective` beta 0.999 (E9b) | 0.1814 | 4.2668 | **23.53x** | 1.0000 |
+| `inverse` (not screened) | 0.0562 | 4.6120 | 82.00x | 1.0000 |
+
+**`training.class_weighting_beta` was made configurable** at the user's
+direction before E9b ran. At the library default of 0.9999 the effective scheme
+reaches 69.52x — nearly as aggressive as the full inverse weighting E9 excludes
+for being too aggressive — which would have left both arms clustered at one end
+with nothing between 9.1x and 82x. At beta 0.999 the arm sits at 23.53x and the
+pair genuinely brackets the space. Beta defaults to 0.9999 so configs naming
+only the scheme are unchanged, and it is recorded in every run summary.
+
+**Every arm's one-variable property is pinned by a test**, and a test confirms
+that all five historical configs still resolve to `mixing: none` and
+`fine_grained: none`, so no earlier experiment changes meaning.
+
+**Verification.** 906 tests pass (146 added: 29 E5, 38 E7, 37 E8, 12 analysis,
+30 config/loader/dataset), `ruff` and `mypy` clean, and `smoke_train.py` still
+passes on the disabled path. All four rice10 recipes were confirmed to actually
+train on real data — finite loss, optimiser steps taken, weights updated —
+before any plan was quoted.
+
+**Plan measurements**, taken before the runs (RTX 4070 Laptop, batch 64, AMP on,
+seed 1337, full splits, **no test loader built**). Measured runtimes came in at
+5.1–5.9 min for the rice10 arms and 49.0 / 49.8 min for the full102 arms, against
+these estimates:
+
+| arm | scope | s/step | peak step VRAM | estimated |
+| --- | --- | --- | --- | --- |
+| E6a lr 0.0008 | rice10 | 0.065 | 852.1 MiB | ~4.6 min |
+| E6b lr 0.0030 | rice10 | 0.059 | 852.1 MiB | ~4.3 min |
+| E6c wd 0.10 | rice10 | 0.056 | 852.1 MiB | ~4.0 min |
+| E7a MixUp | rice10 | 0.060 | 852.1 MiB | ~4.3 min |
+| E7b CutMix | rice10 | 0.059 | 852.1 MiB | ~4.2 min |
+| E8 SupCon | rice10 | 0.055 | 852.1 MiB | ~4.0 min |
+| E9a inverse_sqrt | full102 | 0.058 | 852.5 MiB | ~43.3 min |
+| E9b effective (beta 0.999) | full102 | 0.055 | 852.5 MiB | ~41.4 min |
+
+Peak VRAM is unchanged at ~852 MiB for every arm, including E8 — the projection
+head adds ~50k parameters and the contrastive similarity matrix is 64x64. The
+auxiliary objective costs essentially nothing in memory or time.
+
 ## Verified invariants
 
 These are enforced by tests and re-checked every phase.
@@ -1131,6 +1503,36 @@ These are enforced by tests and re-checked every phase.
 - The Phase 8 protocol applies **no imbalance mitigation**:
   `class_weighting` is `none` while selection and early stopping run on macro F1.
   The choice is pinned by a test so it reads as deliberate rather than defaulted.
+- An ensemble averages **raw logits**, never predicted labels or probabilities,
+  and exposes no per-member weight argument, so weights cannot be tuned on the
+  validation split that judges the ensemble.
+- Ensemble members are refused unless their scope, class count, sample count
+  **and target vectors** all agree. Members may differ in preprocessing — a
+  160x160 and a 224x224 model combine legitimately — because each is scored
+  through its own recorded pipeline; alignment is proven by the shared target
+  vector rather than assumed from loader order.
+- `rice10` and `full102` members can never be ensembled together; the scope check
+  rejects it before any logit is touched.
+- E5 records each member's **epoch** and never assumes `best.pt` holds the
+  numerically best epoch under the corrected metric.
+- Selective (post-abstention) accuracy is reported in a block separate from
+  full-coverage metrics, and its entries carry no bare `accuracy` key, so the two
+  cannot be conflated by a report reader.
+- Batch mixing is **training-only**: applying it outside a training pass raises,
+  and evaluation preprocessing is untouched. Metrics are always accumulated
+  against the original hard labels.
+- CutMix lambda is derived from the **actual clipped box area**, verified by
+  measuring the changed pixels, not from the lambda that sized the box.
+- Mixing draws come from a generator seeded off the run seed and do not consume
+  the global RNG stream, so the dataloader's augmentation draws are unaffected.
+- `forward()` returns raw class logits regardless of the auxiliary objective, and
+  the projection head is absent from the model's `state_dict`, so a checkpoint
+  trained with E8 loads into the ordinary inference path unchanged.
+- `training.mixing` and `training.fine_grained` default to `none`, and a test
+  confirms every pre-Phase-8.1 config still resolves to the disabled path.
+- Every Phase 8.1 arm differs from its control in exactly one conceptual field,
+  pinned by tests; the E7 arms are additionally pinned to keep label smoothing at
+  the control value, and the E9 arms to leave sampling unchanged.
 
 ## Open risks
 
@@ -1159,11 +1561,11 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 19 | ~~Full training reproducibility untested end to end~~ **Closed in Phase 7.2.** E0 rebuilt the corrected Phase 7 custom run bit-identically: max per-epoch macro F1 delta 0.00000000 across all 60 epochs, and identical per-class F1, at fixed `num_workers`. Changing the worker count still changes augmentation draws (risk 14) | done |
 | 20 | ~~The runtime estimate's 40% validation ratio is unmeasured~~ **Largely closed in Phase 7.** Peak VRAM predictions came within 0.7% and the per-epoch estimate matched the baseline's real ~11.1 s. Validation is far cheaper than 40% in practice (~0.9 s against ~11 s), so the estimate is conservative | done |
 | 23 | **New in Phase 7, refined in Phase 7.2**: both Phase 7 arms peaked at or beside the 60-epoch cap, which looked like undertraining. E1 tested it: given 100 epochs and a stretched cosine the model stopped early at 69 having peaked at 54, and did *not* beat E0 on the late-run mean. So the cap was not the binding constraint — the 60-epoch cosine anneals to zero by epoch 60, which is what made both arms look still-climbing | done |
-| 24 | **New in Phase 7, and it recurred in Phase 8 as a hard failure**: Phase 7 saw a 51-minute stall in the baseline's epoch 34; Phase 8's first `baseline_cnn` attempt was killed outright at epoch 39/60 by an unexpected laptop restart. Long runs on this machine are genuinely exposed. **Mitigation proved adequate**: atomic writes left zero corrupt records, and a from-scratch restart reproduced the lost run bit-identically. Prefer an idle desktop for multi-hour runs, and expect to restart rather than resume, since resuming breaks RNG-stream continuity (risk 14) | 9 |
+| 24 | **New in Phase 7; recurred in Phase 8 and AGAIN in Phase 8.1 — three long-run losses on this machine**: Phase 7 saw a 51-minute stall in the baseline's epoch 34; Phase 8's first `baseline_cnn` attempt was killed outright at epoch 39/60 by an unexpected laptop restart. Long runs on this machine are genuinely exposed. **Mitigation proved adequate**: atomic writes left zero corrupt records, and a from-scratch restart reproduced the lost run bit-identically. Phase 8.1's E9b was lost to a freeze/crash at epoch 28/60. The mitigation held a third time: **28 epochs, zero corrupt lines**, both checkpoints loading cleanly, and the from-scratch restart reproduced the lost run **bit-identically** (max |delta| 0.000000000000 over the overlapping epochs). Prefer an idle desktop for multi-hour runs, and expect to restart rather than resume, since resuming breaks RNG-stream continuity (risk 14) | 9 |
 | 35 | **New in Phase 8**: the `custom_cnn` vs `baseline_cnn` full102 result is **single-seed**. The +0.1185 margin is 5.9x the 0.02 provisional threshold and both readings agree to 0.0001, so the direction is not in doubt — but E4 demonstrated that a single-seed margin can shrink substantially under replication, so the exact magnitude is provisional. No full102 seed replication has been run (~2.8 h per additional seed pair) | 9 |
 | 36 | **New in Phase 8**: `baseline_cnn` was still improving at the 60-epoch cap (best at epoch 60, last-10 range 0.0068), so **its 0.4258 is a floor, not a ceiling**. `custom_cnn` peaked at 54 and plateaued. The comparison is still valid — both arms were cut off identically — but the true gap at convergence is unknown and could be smaller. Extending the budget is a protocol change that must apply to both arms | 9 |
 | 21 | **New in Phase 7**: free VRAM measured from inside a CUDA context (7,014 MiB) disagrees with `nvidia-smi` before the process starts (4,838 MiB), because Windows evicts idle desktop allocations under demand. Planning uses the conservative `nvidia-smi` figure; peak step VRAM of 1,991 MiB fits either way, but a larger batch size must be planned against the lower number | 8 |
-| 22 | **New in Phase 7**: the shared protocol uses the midpoint learning rate 0.0015 for both arms, so neither is at its own optimum. This is deliberate — it is what makes the comparison controlled — but it means the comparison establishes which architecture is better *at a common setting*, not which has the higher achievable ceiling | 7, 8 |
+| 22 | ~~The midpoint learning rate 0.0015 leaves neither arm at its own optimum~~ **Largely closed in Phase 8.1.** E6 screened both directions on `custom_cnn`: 0.0008 lost by 0.0166 and 0.0030 by 0.0039, so 0.0015 sits near the top of a flat region and the midpoint was not costing measurable accuracy. Measured for `custom_cnn` only, at one seed; `baseline_cnn` was not rescreened, but it is not the selected architecture | done |
 | 25 | **New in Phase 7.1**: `custom_cnn`'s `best.pt` holds epoch 58, which the defective metric selected; the corrected best is epoch 60. The checkpoint was deliberately not rewritten. Any statement about "the best model" from that run must name the selecting metric, and Phase 9 must not freeze that checkpoint assuming it is the corrected optimum | 8, 9 |
 | 26 | **New in Phase 7.1**: the metric defect survived a passing scikit-learn comparison because no test case exercised precision + recall in (0, 1). Other metrics verified the same way — balanced accuracy, top-5, and anything Phase 9 adds — carry the same exposure unless their tests cover the intervals where implementations can diverge | 8, 9 |
 | 27 | **New in Phase 7.2**: E1 changes both budget and cosine schedule shape, since the schedule is defined over `training.epochs`. The two are inseparable for a cosine, so an E1 gain cannot be attributed to length alone. **Moot in practice** — E1 did not improve on the late-run mean, so there is no gain to attribute | done |
@@ -1174,6 +1576,14 @@ Carried forward from Phase 1, plus items raised in Phase 2.
 | 28 | **New in Phase 7.3**: no human review pass has been completed. The audit built the queue; the real rates of `diagram_text`, `symptom_only`, `tiny_subject`, `unrelated` and genuine mislabelling are all still unknown, and the 30.5% `suspected_mislabel` figure is a model error rate, not a defect count | 8, 9 |
 | 29 | **New in Phase 7.3, confirmed**: the `blurry` flag is a variance-of-Laplacian focus measure at an unvalidated threshold of 100. The false positive is now *demonstrated*, not merely predicted — contact sheets show sharp moth and hopper photographs flagged because the subject is smooth against a plain background, and the flagged cohort scores **better** than average (0.708 vs 0.604 on held-out validation). Read the flag as "low texture", not "out of focus"; its 2.2–3.3% is a queue size, not a blur rate | 8, 9 |
 | 33 | **New in Phase 7.3**: `full102` has not been reviewed at all. At 52,603 reviewable images it is ~10x the rice10 work, so every review finding above describes rice10 only | 8 |
+| 37 | **New in Phase 8.1 (E5), and CONFIRMED by Stage 1**: the cheap inference-time options were exhausted without a gain, and the training options have now failed too — all seven training arms landed at or below their control, best −0.0012. The plateau is not an untuned knob. **The realistic remaining levers are the abstention policy (already good: full102 answers ~50% at ~85%), more or better data, or a different architecture** — none of which is a Phase 8.1 experiment. Original E5 evidence: Flip-TTA averaged −0.0043 macro F1 across six paired rice10 runs and −0.0021 on full102; no uniform ensemble beat its own best member except by +0.0032, a third of the noise threshold. Every remaining route to higher accuracy therefore requires **training**, which is more expensive and less certain. If E6–E9 also come back inside noise, the honest conclusion is that ~0.60 validation accuracy is close to this architecture's ceiling on this data, and the product answer is the abstention policy rather than a better headline number | 8.1, 9 |
+| 38 | **New in Phase 8.1**: E6–E9 are **screened at a single seed (1337)**, and E4 established that a single-seed rice10 margin under ~0.02 can shrink or reverse. Risk 34 additionally showed that three seeds cannot resolve a ~0.008 gap. So the screen can promote a candidate but cannot confirm one, and any arm that lands inside ±0.02 must be treated as unresolved rather than as a small win | 8.1 |
+| 39 | ~~E7 and E8 add training code paths that have never completed a full run~~ **Closed in Phase 8.1.** All three completed 60-epoch runs with 0 AMP skipped steps, finite losses throughout and no late divergence; E9a/E9b likewise on full102 (17 and 14 skips, matching the control's 16). The paths are exercised. Original concern: They are unit-tested, and all four recipes were verified to train on real batches with finite loss and moving weights, but a defect that only appears over 60 epochs — a slow divergence, a late NaN, an interaction with the AMP scaler — would not have been caught yet. The first full run of each is also its first integration test | 8.1 |
+| 40 | **New in Phase 8.1**: the auxiliary objective's weight (0.1) and temperature (0.07) are **published defaults, not tuned values**, exactly the situation risk 22 flags for the learning rate. A negative E8 result is therefore evidence about *this setting*, not about contrastive learning on this task, and must be reported that way | 8.1 |
+| 41 | ~~E9's two schemes differ far less than intended~~ **Closed, then answered.** Beta was made configurable and E9b ran at 23.53x rather than 69.5x. The measurement then made the concern moot in the other direction: the *gentler* arm (E9a, 9.06x) was the only one to help the rare quartile at all, and E9b's stronger correction lost on every quartile. Stronger weighting is not the direction, so full inverse at 82x is now firmly excluded | done |
+| 42 | **New in Phase 8.1 Stage 1**: every arm is **single-seed (1337)**, and four of the seven landed inside the ±0.02 band that E4 showed can reverse across seeds. Those four (E6a, E6b, E7a, E8) are recorded as *unresolved*, not as "slightly worse" — the screen can rule out large effects but cannot distinguish a small real loss from noise. Only E7b (−0.0769) is outside the band. Confirming any of them would cost 3 seeds x ~6 min on rice10, which is cheap, but nothing there is promising enough to justify it | 9 |
+| 43 | **New in Phase 8.1 Stage 1**: E7a MixUp **improved validation loss (1.5135 vs 1.5989), top-5 (0.8946 vs 0.8821) and selective accuracy (87.0% at threshold 0.7 vs 77.5%) while losing macro F1**. The primary metric and the calibration metrics disagree, so "MixUp did not help" is true only of top-1 discrimination. If the deployed policy is abstention-based — which the scope decision suggests it should be — MixUp may be the better recipe on the metric that actually matters to users, at the cost of coverage (59.4% vs 78.9% at 0.5). This was not the phase's selection criterion and is **not** proposed as a change; it is flagged because Phase 9's uncertainty policy should weigh it | 9 |
+| 44 | **New in Phase 8.1 Stage 1**: E9 established that full102 weighting **redistributes rather than improves** — E9a gained +0.0141 on the rarest quartile and lost −0.0140 on the largest, at roughly 1:1, with balanced accuracy +0.0204 and raw accuracy −0.0136. There is no setting that avoids the trade, and the stronger arm was worse everywhere. Whether to take it is a **product decision** about whether rare-pest recall is worth common-pest accuracy, not a metric decision — and macro F1 will not make it | 9 |
 
 ## Rules in force
 

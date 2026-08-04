@@ -281,6 +281,52 @@ def test_effective_scheme_rejects_a_bad_beta() -> None:
         class_weights([0, 1], 2, scheme="effective", beta=1.0)
 
 
+def test_effective_beta_controls_the_correction_strength() -> None:
+    """Beta governs the effective scheme entirely, and the range is wide.
+
+    Pinned because Phase 8.1's E9b turns on this: the same scheme name means a
+    nearly-maximal correction at 0.9999 and a moderate one at 0.999, so a run
+    that records only the scheme has not recorded its treatment.
+    """
+    # full102's real extremes: 42 training images against 3,444, an 82x
+    # imbalance. The absolute counts matter, not only their ratio — beta acts
+    # through beta**count, so a 1-vs-82 toy saturates quite differently.
+    targets = [0] * 3444 + [1] * 42
+    ratios = {}
+    for beta in (0.99, 0.999, 0.9995, 0.9999):
+        weights = class_weights(targets, 2, scheme="effective", beta=beta)
+        ratios[beta] = max(weights) / min(weights)
+
+    # Monotonic: a beta closer to 1 is a stronger correction.
+    assert ratios[0.99] < ratios[0.999] < ratios[0.9995] < ratios[0.9999]
+    # And the span is large enough that the choice is not cosmetic: ~2.9x at
+    # 0.99 against ~82x at 0.9999, on a distribution whose true imbalance is
+    # 82x. These reproduce the measured full102 extremes.
+    assert ratios[0.99] < 4.0
+    assert ratios[0.9999] > 40.0
+    assert ratios[0.9999] / ratios[0.99] > 10.0
+    # The E9b setting sits between the extremes rather than near either.
+    assert 15.0 < ratios[0.999] < 35.0
+
+
+def test_effective_beta_at_zero_is_uniform() -> None:
+    """Beta 0 removes the correction entirely rather than erroring."""
+    weights = class_weights([0] * 8 + [1] * 2, 2, scheme="effective", beta=0.0)
+    assert weights == pytest.approx((1.0, 1.0))
+
+
+def test_beta_is_ignored_by_the_other_schemes() -> None:
+    """Only the effective scheme consumes beta.
+
+    So passing it alongside `inverse_sqrt` cannot silently change that arm.
+    """
+    targets = [0] * 16 + [1] * 4
+    for scheme in ("inverse", "inverse_sqrt"):
+        low = class_weights(targets, 2, scheme=scheme, beta=0.9)
+        high = class_weights(targets, 2, scheme=scheme, beta=0.9999)
+        assert low == pytest.approx(high)
+
+
 def test_weights_cover_all_102_classes() -> None:
     """The scope drives the length, so full102 must yield 102 weights."""
     weights = class_weights(list(range(102)), FULL102.num_classes, scheme="inverse")

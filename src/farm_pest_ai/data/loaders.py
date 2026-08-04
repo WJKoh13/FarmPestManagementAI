@@ -69,6 +69,13 @@ __all__ = [
 #: fixes 64 at 160x160 as the starting point.
 DEFAULT_BATCH_SIZE = 64
 
+#: Used when ``training.class_weighting_beta`` is absent. Matches the
+#: :func:`~farm_pest_ai.data.dataset.class_weights` default, so an existing
+#: configuration that names only ``class_weighting`` behaves exactly as before.
+#: Beta governs the entire strength of the ``effective`` scheme: on full102's 82x
+#: imbalance 0.9999 gives a 69.5x weight ratio and 0.999 gives 23.5x.
+DEFAULT_CLASS_WEIGHT_BETA = 0.9999
+
 
 class LoaderError(RuntimeError):
     """Raised when a loader cannot be built from the given configuration."""
@@ -455,6 +462,12 @@ class LoaderBundle:
             "batch_size": self.batch_size,
             "seed": self.seed,
             "class_weighting": self._extra.get("class_weighting", "none"),
+            # Recorded even when the scheme ignores it, so a run's summary always
+            # states the exact parameters its weight vector came from rather
+            # than leaving beta to be inferred from a default that may change.
+            "class_weighting_beta": self._extra.get(
+                "class_weighting_beta", DEFAULT_CLASS_WEIGHT_BETA
+            ),
             "class_weights": (
                 list(self.class_weights) if self.class_weights is not None else None
             ),
@@ -541,6 +554,12 @@ def build_loaders(
     }
 
     scheme = str(training.get("class_weighting", "none"))
+    # The effective-number scheme's strength is governed entirely by beta, and
+    # the difference is large: on full102's 82x imbalance the default 0.9999
+    # produces a 69.5x weight ratio while 0.999 produces 23.5x. Leaving it
+    # hard-coded would make "effective" a single fixed intensity rather than a
+    # tunable correction, so it is configuration like every other knob.
+    beta = float(training.get("class_weighting_beta", DEFAULT_CLASS_WEIGHT_BETA))
     weights: tuple[float, ...] | None = None
     if scheme != "none":
         train_dataset = datasets.get("train")
@@ -552,7 +571,10 @@ def build_loaders(
             )
         try:
             weights = class_weights(
-                train_dataset.targets, train_dataset.num_classes, scheme=scheme
+                train_dataset.targets,
+                train_dataset.num_classes,
+                scheme=scheme,
+                beta=beta,
             )
         except ValueError as exc:
             raise LoaderError(str(exc)) from exc
@@ -578,5 +600,5 @@ def build_loaders(
         batch_size=resolved_batch,
         seed=resolved_seed,
         class_weights=weights,
-        _extra={"class_weighting": scheme},
+        _extra={"class_weighting": scheme, "class_weighting_beta": beta},
     )
