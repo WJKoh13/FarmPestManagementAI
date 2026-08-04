@@ -133,6 +133,13 @@ class PestAssistant:
             return f"No pest model is loaded. {self.loaded.reason}"
         if self.loaded.under_trained:
             return self.loaded.reason or "This checkpoint is under-trained; treat results as a test only."
+        if self.loaded.trained_on_box_crops:
+            return (
+                "This model was trained on cropped insect boxes "
+                f"(margin {self.loaded.crop_margin}). A photo with no bounding box is "
+                "fed whole, which is a different distribution from the one it learned; "
+                "treat those predictions with extra caution."
+            )
         return ""
 
     def display_name_for(self, slug: str) -> str:
@@ -149,6 +156,10 @@ class PestAssistant:
         return predict_topk(
             self.model, Path(image_path), self.class_names, self.views,
             k=k, tta=tta, device=self.device, box=box,
+            # The margin the weights were trained with, not a constant. The
+            # legacy custom_cnn import records 0.15; older bundles record
+            # nothing and fall back to the protocol's 0.25.
+            crop_margin=self.loaded.crop_margin,
         )
 
     # ----------------------------------------------------------------- context
