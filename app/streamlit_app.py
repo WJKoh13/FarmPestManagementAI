@@ -163,7 +163,8 @@ with st.sidebar:
                     "Checkpoint", options,
                     index=options.index(current) if current in options else 0,
                     format_func=lambda path: next(
-                        run["display_label"] + (" ⚠" if run["under_trained"] else "")
+                        run.get("display_label", run.get("model", ""))
+                        + (" ⚠" if run["under_trained"] else "")
                         for run in usable if str(run["path"]) == path
                     ),
                     label_visibility="collapsed",
@@ -180,7 +181,13 @@ with st.sidebar:
             for run in runs:
                 if not run["usable"]:
                     st.markdown(
-                        f'<div class="side-note bad">✗ {run["display_name"]} — {run["problem"]}<br>'
+                        # `.get`, not `[...]`: the front end and the backend are
+                        # separate processes and can be running different
+                        # versions of this repo. A key the older one does not
+                        # send yet must degrade to a plainer name, not take the
+                        # whole page down with a KeyError.
+                        f'<div class="side-note bad">✗ {run.get("display_name") or run["model"]}'
+                        f' — {run["problem"]}<br>'
                         f'<span class="side-note-path">{run["label"]}</span></div>',
                         unsafe_allow_html=True,
                     )
